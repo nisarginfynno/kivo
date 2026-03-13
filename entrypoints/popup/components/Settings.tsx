@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { browser } from "wxt/browser";
+import { getRelevantMeme } from "../../../utils/memes";
 
 interface SettingsProps {
   isHalfDay: boolean;
@@ -8,6 +9,7 @@ interface SettingsProps {
 
 export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [memesEnabled, setMemesEnabled] = useState(false);
   const [domain, setDomain] = useState("");
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<string>("");
@@ -17,12 +19,14 @@ export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const { notifications_enabled, keka_domain } =
+        const { notifications_enabled, keka_domain, memes_enabled } =
           await browser.storage.local.get([
             "notifications_enabled",
             "keka_domain",
+            "memes_enabled",
           ]);
         setNotificationsEnabled(!!notifications_enabled);
+        setMemesEnabled(!!memes_enabled);
         if (keka_domain) {
           setDomain(keka_domain as string);
         }
@@ -67,6 +71,18 @@ export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
       console.error("Error saving settings:", error);
       // Revert state on error
       setNotificationsEnabled(!notificationsEnabled);
+    }
+  };
+
+  const toggleMemes = async () => {
+    try {
+      const newState = !memesEnabled;
+      setMemesEnabled(newState);
+      await browser.storage.local.set({ memes_enabled: newState });
+    } catch (error) {
+      console.error("Error saving meme settings:", error);
+      // Revert state on error
+      setMemesEnabled(!memesEnabled);
     }
   };
 
@@ -157,13 +173,34 @@ export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
                 return;
               }
               try {
-                await browser.notifications.create({
-                  type: "basic",
-                  iconUrl: "icon/128.png",
-                  title: "Test Notification! 🔔",
-                  message: "Your notifications are working perfectly! 🎉",
-                  silent: false,
-                });
+                let imageUrl: string | null = null;
+                if (memesEnabled) {
+                  try {
+                    imageUrl = await getRelevantMeme("completion");
+                  } catch (e) {
+                    console.error("Failed to fetch test meme:", e);
+                  }
+                }
+
+                if (imageUrl) {
+                  await browser.notifications.create({
+                    type: "image",
+                    iconUrl: "icon/128.png",
+                    title: "Test Notification! 🔔",
+                    message: "Your notifications are working perfectly! 🎉",
+                    imageUrl,
+                    silent: false,
+                  });
+                } else {
+                  await browser.notifications.create({
+                    type: "basic",
+                    iconUrl: "icon/128.png",
+                    title: "Test Notification! 🔔",
+                    message: "Your notifications are working perfectly! 🎉",
+                    silent: false,
+                  });
+                }
+
                 try {
                   const audio = new Audio("/notification-tune.mp3");
                   await audio.play();
@@ -242,6 +279,25 @@ export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
                 className="toggle-switch"
                 checked={notificationsEnabled}
                 onChange={toggleNotifications}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="settings-row" style={{ marginBottom: "16px" }}>
+          <div>
+            <div className="settings-label">Enable Memes in Notifications</div>
+            <div className="settings-description">
+              Show fun context-relevant memes in alerts
+            </div>
+          </div>
+          <div className="toggle-wrapper">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                className="toggle-switch"
+                checked={memesEnabled}
+                onChange={toggleMemes}
               />
             </label>
           </div>

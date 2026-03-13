@@ -11,6 +11,10 @@ export default defineConfig({
     host_permissions: [
       "https://*.keka.com/*",
       "http://*.keka.com/*",
+      "https://meme-api.com/*",
+      "https://*.redd.it/*",
+      "https://*.redditmedia.com/*",
+      "https://*.imgur.com/*",
     ],
   },
 });
