@@ -12,6 +12,7 @@ export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<string>("");
   const [fontPreference, setFontPreference] = useState<"sans" | "mono">("sans");
+  const [lunchTime, setLunchTime] = useState("12:30");
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -26,11 +27,16 @@ export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
           setDomain(keka_domain as string);
         }
 
-        const { keka_font_preference } = await browser.storage.local.get(
-          "keka_font_preference",
-        );
+        const { keka_font_preference, lunch_time } =
+          await browser.storage.local.get([
+            "keka_font_preference",
+            "lunch_time",
+          ]);
         if (keka_font_preference) {
           setFontPreference(keka_font_preference as "sans" | "mono");
+        }
+        if (lunch_time) {
+          setLunchTime(lunch_time as string);
         }
       } catch (error) {
         console.error("Error loading settings:", error);
@@ -126,6 +132,99 @@ export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
             >
               {saveStatus || "Save"}
             </button>
+          </div>
+        </div>
+
+        <div
+          className="settings-row"
+          style={{
+            marginBottom: "16px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            <div className="settings-label">Test Notifications</div>
+            <div className="settings-description">
+              Send a test notification to verify delivery
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              if (!browser || !browser.notifications) {
+                alert("Notifications API not available");
+                return;
+              }
+              try {
+                await browser.notifications.create({
+                  type: "basic",
+                  iconUrl: "icon/128.png",
+                  title: "Test Notification! 🔔",
+                  message: "Your notifications are working perfectly! 🎉",
+                  silent: false,
+                });
+                try {
+                  const audio = new Audio("/notification-tune.mp3");
+                  await audio.play();
+                } catch (e) {
+                  console.error("Failed to play test notification audio:", e);
+                }
+              } catch (error) {
+                console.error("Error showing test notification:", error);
+                alert("Failed to show notification. Check permissions.");
+              }
+            }}
+            style={{
+              padding: "8px 16px",
+              borderRadius: "6px",
+              border: "1px solid #e2e8f0",
+              backgroundColor: "white",
+              color: "#3b82f6",
+              cursor: "pointer",
+              fontSize: "14px",
+              fontWeight: 500,
+            }}
+          >
+            Test Now
+          </button>
+        </div>
+
+        <div
+          className="settings-row"
+          style={{
+            marginBottom: "16px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            <div className="settings-label">Lunch Time</div>
+            <div className="settings-description">
+              When to notify for lunch break
+            </div>
+          </div>
+          <div>
+            <input
+              type="time"
+              value={lunchTime}
+              onChange={async (e) => {
+                const newTime = e.target.value;
+                setLunchTime(newTime);
+                await browser.storage.local.set({ lunch_time: newTime });
+              }}
+              style={{
+                padding: "8px",
+                borderRadius: "6px",
+                border: "1px solid #e2e8f0",
+                fontSize: "14px",
+                backgroundColor: "#f8fafc",
+                outline: "none",
+                fontFamily: "inherit",
+                color: "inherit",
+              }}
+            />
           </div>
         </div>
 

@@ -1,9 +1,9 @@
 // Background service worker for continuous Keka monitoring and notifications
 import { browser } from "wxt/browser";
 import type { NotificationStates } from "../utils/types";
-import { fetchAttendanceSummary, fetchHolidays, fetchLeaveSummary } from "../utils/api";
-import { calculateMetrics, processMonthlyStats } from "../utils/calculations";
-import { format } from "date-fns";
+import { fetchAttendanceSummary, fetchHolidays, fetchLeaveSummary, fetchRangeStats } from "../utils/api";
+import { calculateMetrics, processMonthlyStats, processWeeklyStats } from "../utils/calculations";
+import { format, startOfWeek, endOfWeek } from "date-fns";
 
 // Get current date/week keys
 function getCurrentDay(): string {
@@ -12,6 +12,45 @@ function getCurrentDay(): string {
 
 function getCurrentWeek(): string {
   return `week_${new Date().getFullYear()}-${Math.floor(new Date().getDate() / 7)}`;
+}
+
+// Play notification sound via Offscreen Document (service workers can't use Audio API directly)
+let offscreenCreated = false;
+
+async function ensureOffscreenDocument() {
+  if (offscreenCreated) return;
+  try {
+    // Check if an offscreen document already exists
+    const existingContexts = await (browser as any).runtime.getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+    });
+    if (existingContexts && existingContexts.length > 0) {
+      offscreenCreated = true;
+      return;
+    }
+    await (browser as any).offscreen.createDocument({
+      url: "sound-player.html",
+      reasons: ["AUDIO_PLAYBACK"],
+      justification: "Play notification sound when alerts fire",
+    });
+    offscreenCreated = true;
+  } catch (error) {
+    // May fail if document already exists (race condition) — that's fine
+    if ((error as Error)?.message?.includes("single offscreen")) {
+      offscreenCreated = true;
+    } else {
+      console.error("Error creating offscreen document:", error);
+    }
+  }
+}
+
+async function playNotificationSound() {
+  try {
+    await ensureOffscreenDocument();
+    await browser.runtime.sendMessage({ type: "PLAY_NOTIFICATION_SOUND" });
+  } catch (error) {
+    console.error("Error playing notification sound:", error);
+  }
 }
 
 // Optimized notification helper
@@ -32,8 +71,11 @@ async function showNotification(title: string, message: string, requireInteracti
       title,
       message,
       requireInteraction,
-      silent: false,
+      silent: true, // Suppress OS sound — we play our own
     });
+
+    // Play custom notification sound via offscreen document
+    await playNotificationSound();
   } catch (error) {
     console.error("Error showing notification:", error);
   }
@@ -67,6 +109,7 @@ async function getNotificationStates(): Promise<NotificationStates> {
     `lunch_break_notified_${currentDay}`,
     `tea_break_notified_${currentDay}`,
     `average_target_notified_${currentDay}`,
+    `weekly_average_target_notified_${currentDay}`,
     `token_expired_notified_${currentDay}`
   ];
 
@@ -83,7 +126,8 @@ async function getNotificationStates(): Promise<NotificationStates> {
     lunchBreakNotifiedToday: Boolean(result[keys[7]]),
     teaBreakNotifiedToday: Boolean(result[keys[8]]),
     averageTargetNotifiedToday: Boolean(result[keys[9]]),
-    tokenExpiredNotifiedToday: Boolean(result[keys[10]]),
+    weeklyAverageTargetNotifiedToday: Boolean(result[keys[10]]),
+    tokenExpiredNotifiedToday: Boolean(result[keys[11]]),
   };
 }
 
@@ -102,6 +146,7 @@ async function updateNotificationState(stateKey: keyof NotificationStates, value
     lunchBreakNotifiedToday: `lunch_break_notified_${currentDay}`,
     teaBreakNotifiedToday: `tea_break_notified_${currentDay}`,
     averageTargetNotifiedToday: `average_target_notified_${currentDay}`,
+    weeklyAverageTargetNotifiedToday: `weekly_average_target_notified_${currentDay}`,
     tokenExpiredNotifiedToday: `token_expired_notified_${currentDay}`,
   };
 
@@ -169,7 +214,7 @@ async function handleTokenExpiration(accessToken: string) {
 async function runNotificationLogic() {
   try {
     const currentDay = getCurrentDay();
-    const storageKeys = ['access_token', `halfDay_${currentDay}`, 'attendance_data'];
+    const storageKeys = ['access_token', `halfDay_${currentDay}`, 'attendance_data', 'current_total_worked_seconds', 'lunch_time'];
     const storageData = await browser.storage.local.get(storageKeys);
 
     const accessToken = storageData.access_token as string;
@@ -223,11 +268,16 @@ async function runNotificationLogic() {
     }
 
     // Calculate current metrics
-    const { metrics, totalWorkedMinutes, isClockedIn, leaveTimeInfo } = calculateMetrics(attendanceData, isHalfDay);
+    const { metrics, totalWorkedSeconds, isClockedIn, leaveTimeInfo } = calculateMetrics(attendanceData, isHalfDay);
+    const totalWorkedMinutes = Math.floor(totalWorkedSeconds / 60);
 
     // Calculate monthly stats for "Average Target"
     const monthlyStats = processMonthlyStats(attendanceData, holidaysData, leaveData);
     const hoursNeededPerDay = monthlyStats.hoursNeededPerDay;
+
+    // Calculate weekly stats for "Weekly Average Target"
+    const weeklyStats = processWeeklyStats(attendanceData, holidaysData, leaveData, isHalfDay, new Date());
+    const weeklyHoursNeededPerDay = weeklyStats.hoursNeededPerDay;
 
     // Get notification states
     const notificationStates = await getNotificationStates();
@@ -254,7 +304,7 @@ async function runNotificationLogic() {
       }
     }
 
-    // 2. Average Target Met (Happy Sense)
+    // 2. Average Target Met (Monthly)
     // Only if hoursNeededPerDay is available and LESS than the standard 8h 15m (8.25)
     // and user has reached that target.
     if (!notificationStates.averageTargetNotifiedToday && hoursNeededPerDay !== null) {
@@ -264,9 +314,25 @@ async function runNotificationLogic() {
         const neededMinutes = Math.ceil(hoursNeededPerDay * 60);
         if (totalWorkedMinutes >= neededMinutes) {
           notificationsToShow.push({
-            title: "Daily Average Met! 🌟",
-            message: "Great job today! 🎉 You’ve already hit your daily average. Feel free to wrap up whenever you’re ready — your monthly 8h 15m average is still on track! 🥳",
+            title: "Monthly Average Met! 🌟",
+            message: "Great job today! 🎉 You’ve already hit your needed daily average. Feel free to wrap up whenever you’re ready — your monthly 8h 15m average is on track! 🥳",
             stateKey: "averageTargetNotifiedToday",
+            newValue: true
+          });
+        }
+      }
+    }
+
+    // 2b. Average Target Met (Weekly)
+    if (!notificationStates.weeklyAverageTargetNotifiedToday && weeklyHoursNeededPerDay !== null) {
+      const standardTargetHours = 8.25;
+      if (weeklyHoursNeededPerDay < standardTargetHours) {
+        const neededMinutes = Math.ceil(weeklyHoursNeededPerDay * 60);
+        if (totalWorkedMinutes >= neededMinutes) {
+          notificationsToShow.push({
+            title: "Weekly Average Met! 🌟",
+            message: "Great job today! 🎉 You’ve hit your daily target to maintain the weekly 8h 15m average! 🥳",
+            stateKey: "weeklyAverageTargetNotifiedToday",
             newValue: true
           });
         }
@@ -321,20 +387,32 @@ async function runNotificationLogic() {
       }
     }
 
-    // 5. Lunch Break (12:30 PM)
-    if (!notificationStates.lunchBreakNotifiedToday && isClockedIn) {
-      // Trigger at 12:30 PM (handle a simpler window to ensure we catch it if timer slightly off)
-      // Check if time is >= 12:30 and < 13:00 (broad window, but flag prevents repeat)
-      // Or strictly 12:30-12:35
-      if (currentHour === 12 && currentMinute >= 30) {
+    // 5. Lunch Break
+    // if (!notificationStates.lunchBreakNotifiedToday && isClockedIn) {
+    if (!notificationStates.lunchBreakNotifiedToday) {
+      const lunchTimeSetting = (storageData.lunch_time as string) || "12:30";
+      const [lunchHourStr, lunchMinuteStr] = lunchTimeSetting.split(":");
+      const parsedHour = parseInt(lunchHourStr, 10);
+      const lunchHour = isNaN(parsedHour) ? 12 : parsedHour;
+      const parsedMin = parseInt(lunchMinuteStr, 10);
+      const lunchMinute = isNaN(parsedMin) ? 30 : parsedMin;
+
+      const currentTotalMinutes = currentHour * 60 + currentMinute;
+      const lunchTotalMinutes = lunchHour * 60 + lunchMinute;
+
+      if (currentTotalMinutes >= lunchTotalMinutes) {
+        const period = lunchHour >= 12 ? "PM" : "AM";
+        const formatHour = lunchHour % 12 || 12;
+        const formatMin = lunchMinute.toString().padStart(2, "0");
+        const timeString = `${formatHour}:${formatMin} ${period}`;
+
         notificationsToShow.push({
           title: "Lunch Break! 🥗",
-          message: "It's 12:30 PM. Time to grab some lunch and recharge! 🍱",
+          message: `It's ${timeString}. Time to grab some lunch and recharge! 🍱`,
           stateKey: "lunchBreakNotifiedToday",
           newValue: true
         });
       }
-      // If user started AFTER 12:30, they might get this immediately? Yes, if isClockedIn. That seems acceptable.
     }
 
     // 6. Tea Break (4:00 PM)
@@ -384,6 +462,30 @@ async function runNotificationLogic() {
       }
     }
 
+    // 8. Weekly Summary (Fridays only)
+    if (!notificationStates.weeklySummaryNotified && nowLocal.getDay() === 5) {
+      try {
+        const weekStart = format(startOfWeek(nowLocal, { weekStartsOn: 1 }), "yyyy-MM-dd");
+        const weekEnd = format(endOfWeek(nowLocal, { weekStartsOn: 1 }), "yyyy-MM-dd");
+        const rangeStats = await fetchRangeStats(accessToken, weekStart, weekEnd);
+        const weeklyAvg = rangeStats?.data?.myStats?.averageHoursPerDayInHHMM;
+        const totalHours = rangeStats?.data?.myStats?.totalEffectiveHoursInHHMM;
+
+        const message = totalHours
+          ? `This week's total: ${totalHours} (avg ${weeklyAvg}/day). Great job! Have a relaxing weekend. 🎉`
+          : "Another productive week completed! Have a relaxing weekend. 🎉";
+
+        notificationsToShow.push({
+          title: "End of Week Summary 📈",
+          message,
+          stateKey: "weeklySummaryNotified",
+          newValue: true
+        });
+      } catch (e) {
+        // Silently ignore — weekly summary is non-critical
+      }
+    }
+
     // Process notifications in batch
     if (notificationsToShow.length > 0) {
       console.log(`Showing ${notificationsToShow.length} notification(s)`);
@@ -398,13 +500,17 @@ async function runNotificationLogic() {
     }
 
     // Check if data actually changed to avoid unnecessary storage writes and UI jitter
-    const hasDataChanged = JSON.stringify(attendanceData) !== JSON.stringify(storedAttendanceData);
+    // Also check if storedTotalSeconds is different (e.g. for seconds update or migration)
+    const storedTotalSeconds = storageData.current_total_worked_seconds;
+    const hasDataChanged =
+      JSON.stringify(attendanceData) !== JSON.stringify(storedAttendanceData) ||
+      storedTotalSeconds !== totalWorkedSeconds;
 
     if (hasDataChanged) {
       // Store current metrics in storage for the popup to read
       await browser.storage.local.set({
         current_metrics: metrics,
-        current_total_worked_minutes: totalWorkedMinutes,
+        current_total_worked_seconds: totalWorkedSeconds,
         current_is_clocked_in: isClockedIn,
         current_leave_time_info: leaveTimeInfo,
         attendance_data: attendanceData,
