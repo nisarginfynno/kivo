@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 import TodayOverview from "./components/TodayOverview";
 import MonthlyOverview from "./components/MonthlyOverview";
@@ -11,6 +11,7 @@ import { useCurrentMetrics } from "./hooks/useCurrentMetrics";
 import { useHalfDay } from "./hooks/useHalfDay";
 
 import { useWeeklyStats } from "./hooks/useWeeklyStats";
+import { useMonthlyStats } from "./hooks/useMonthlyStats";
 import WeeklyOverview from "./components/WeeklyOverview";
 import { Settings as SettingsIcon, X } from "lucide-react";
 
@@ -66,6 +67,7 @@ function App() {
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [currentDate] = useState(new Date());
   const weeklyStats = useWeeklyStats(accessToken, isHalfDay, currentDate);
+  const monthlyStats = useMonthlyStats(accessToken, currentDate);
 
   // Combine loading/error states appropriately
   const appLoading = authLoading || (activeTab === "today" && metricsLoading);
@@ -187,7 +189,8 @@ function App() {
                   breaks={breaks}
                   unpairedInEntry={unpairedInEntry}
                   totalWorkedSeconds={totalWorkedSeconds}
-                  hoursNeededPerDay={weeklyStats.hoursNeededPerDay}
+                  weeklyHoursNeededPerDay={weeklyStats.hoursNeededPerDay}
+                  monthlyHoursNeededPerDay={monthlyStats.hoursNeededPerDay}
                 />
               )}
 

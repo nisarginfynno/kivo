@@ -1,5 +1,11 @@
 import { Fragment, useState } from "react";
-import { format, differenceInSeconds, subDays, addDays, isSameDay } from "date-fns";
+import {
+  format,
+  differenceInSeconds,
+  subDays,
+  addDays,
+  isSameDay,
+} from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type {
   Metrics,
@@ -21,7 +27,8 @@ interface TodayOverviewProps {
   breaks: Break[];
   unpairedInEntry: TimeEntry | null;
   totalWorkedSeconds: number;
-  hoursNeededPerDay: number | null;
+  weeklyHoursNeededPerDay: number | null;
+  monthlyHoursNeededPerDay: number | null;
 }
 
 export default function TodayOverview({
@@ -35,12 +42,38 @@ export default function TodayOverview({
   breaks: liveBreaks,
   unpairedInEntry: liveUnpairedInEntry,
   totalWorkedSeconds: liveTotalWorkedSeconds,
-  hoursNeededPerDay,
+  weeklyHoursNeededPerDay,
+  monthlyHoursNeededPerDay,
 }: TodayOverviewProps) {
   const [selectedDate, setSelectedDate] = useState(new Date());
-  
+
   const isToday = isSameDay(selectedDate, new Date());
-  
+
+  const formatTargetHours = (hoursNeeded: number) => {
+    const hours = Math.floor(hoursNeeded);
+    const minutes = Math.round((hoursNeeded - hours) * 60);
+
+    return `${hours}h ${minutes}m`;
+  };
+
+  const getTargetLeaveTime = (hoursNeeded: number) => {
+    const now = new Date();
+    const targetSeconds = Math.floor(hoursNeeded * 3600);
+
+    if (totalWorkedSeconds >= targetSeconds) {
+      return "-";
+    }
+
+    const remainingSeconds = Math.max(0, targetSeconds - totalWorkedSeconds);
+    const leaveTime = new Date(now.getTime() + remainingSeconds * 1000);
+    const hours = leaveTime.getHours();
+    const minutes = leaveTime.getMinutes().toString().padStart(2, "0");
+    const ampm = hours >= 12 ? "pm" : "am";
+    const hours12 = hours > 12 ? hours - 12 : hours === 0 ? 12 : hours;
+
+    return `${hours12}:${minutes} ${ampm}`;
+  };
+
   const handlePrevDay = () => {
     setSelectedDate(subDays(selectedDate, 1));
   };
@@ -51,7 +84,12 @@ export default function TodayOverview({
     }
   };
 
-  const pastStats = useDailyStats(accessToken, isHalfDay, selectedDate, !isToday);
+  const pastStats = useDailyStats(
+    accessToken,
+    isHalfDay,
+    selectedDate,
+    !isToday
+  );
 
   // Determine which data to use based on the selected date
   const loading = isToday ? liveLoading : pastStats.loading;
@@ -60,8 +98,12 @@ export default function TodayOverview({
   const leaveTimeInfo = isToday ? liveLeaveTimeInfo : pastStats.leaveTimeInfo;
   const timePairs = isToday ? liveTimePairs : pastStats.timePairs;
   const breaks = isToday ? liveBreaks : pastStats.breaks;
-  const unpairedInEntry = isToday ? liveUnpairedInEntry : pastStats.unpairedInEntry;
-  const totalWorkedSeconds = isToday ? liveTotalWorkedSeconds : pastStats.totalWorkedSeconds;
+  const unpairedInEntry = isToday
+    ? liveUnpairedInEntry
+    : pastStats.unpairedInEntry;
+  const totalWorkedSeconds = isToday
+    ? liveTotalWorkedSeconds
+    : pastStats.totalWorkedSeconds;
 
   const headerContent = (
     <div className="monthly-header" style={{ marginBottom: "16px" }}>
@@ -203,56 +245,40 @@ export default function TodayOverview({
               </div>
               <div className="leave-time">{leaveTimeInfo.normalLeaveTime}</div>
             </div>
-            {hoursNeededPerDay && (
-              <div
-                className="leave-card"
-                style={{ borderColor: "#818cf8", backgroundColor: "#e0e7ff" }}
-              >
-                <div className="leave-label" style={{ color: "#3730a3" }}>
-                  Weekly Avg Target
+            {weeklyHoursNeededPerDay !== null &&
+              weeklyHoursNeededPerDay > 0 && (
+                <div
+                  className="leave-card"
+                  style={{ borderColor: "#818cf8", backgroundColor: "#e0e7ff" }}
+                >
+                  <div className="leave-label" style={{ color: "#3730a3" }}>
+                    Weekly Avg Target
+                  </div>
+                  <div className="leave-sub-label" style={{ color: "#4338ca" }}>
+                    ({formatTargetHours(weeklyHoursNeededPerDay)})
+                  </div>
+                  <div className="leave-time">
+                    {getTargetLeaveTime(weeklyHoursNeededPerDay)}
+                  </div>
                 </div>
-                <div className="leave-sub-label" style={{ color: "#4338ca" }}>
-                  (
-                  {(() => {
-                    const h = Math.floor(hoursNeededPerDay);
-                    const m = Math.round((hoursNeededPerDay - h) * 60);
-                    return `${h}h ${m}m`;
-                  })()}
-                  )
+              )}
+            {monthlyHoursNeededPerDay !== null &&
+              monthlyHoursNeededPerDay > 0 && (
+                <div
+                  className="leave-card"
+                  style={{ borderColor: "#818cf8", backgroundColor: "#e0e7ff" }}
+                >
+                  <div className="leave-label" style={{ color: "#3730a3" }}>
+                    Monthly Avg Target
+                  </div>
+                  <div className="leave-sub-label" style={{ color: "#4338ca" }}>
+                    ({formatTargetHours(monthlyHoursNeededPerDay)})
+                  </div>
+                  <div className="leave-time">
+                    {getTargetLeaveTime(monthlyHoursNeededPerDay)}
+                  </div>
                 </div>
-                <div className="leave-time">
-                  {(() => {
-                    const now = new Date();
-                    // Using minutes for target calculation as hoursNeededPerDay is in hours (float)
-                    // We can convert target to seconds for better precision if needed, but the input is likely derived from hours.
-                    // However, we are comparing against totalWorkedSeconds.
-                    // Let's stick to minutes for this specific calculation if hoursNeededPerDay is rough, OR convert to seconds.
-                    // hoursNeededPerDay is calculated in calculations.ts.
-                    const targetSeconds = Math.floor(hoursNeededPerDay * 3600);
-
-                    if (totalWorkedSeconds >= targetSeconds) {
-                      return "-";
-                    }
-
-                    const remainingSeconds = Math.max(
-                      0,
-                      targetSeconds - totalWorkedSeconds
-                    );
-                    const leaveTime = new Date(
-                      now.getTime() + remainingSeconds * 1000
-                    );
-                    const h = leaveTime.getHours();
-                    const m = leaveTime
-                      .getMinutes()
-                      .toString()
-                      .padStart(2, "0");
-                    const ampm = h >= 12 ? "pm" : "am";
-                    const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
-                    return `${h12}:${m} ${ampm}`;
-                  })()}
-                </div>
-              </div>
-            )}
+              )}
           </div>
         </div>
       )}
@@ -293,7 +319,9 @@ export default function TodayOverview({
                   <span className="duration">
                     (
                     {(() => {
-                      const startDate = new Date(unpairedInEntry.actualTimestamp);
+                      const startDate = new Date(
+                        unpairedInEntry.actualTimestamp
+                      );
                       const now = new Date();
                       const totalSeconds = differenceInSeconds(now, startDate);
                       const hours = Math.floor(totalSeconds / 3600);
