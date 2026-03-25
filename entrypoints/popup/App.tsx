@@ -56,11 +56,11 @@ function App() {
     unpairedInEntry,
     loading: metricsLoading,
     error: metricsError,
-    totalWorkedMinutes,
+    totalWorkedSeconds,
   } = useCurrentMetrics(isHalfDay);
 
   const [activeTab, setActiveTab] = useState<"today" | "weekly" | "monthly">(
-    "today",
+    "today"
   );
 
   const [selectedMonth, setSelectedMonth] = useState(new Date());
@@ -124,8 +124,9 @@ function App() {
               <button
                 className="open-keka-button"
                 onClick={async () => {
-                  const { keka_domain } =
-                    await browser.storage.local.get("keka_domain");
+                  const { keka_domain } = await browser.storage.local.get(
+                    "keka_domain"
+                  );
                   const kekaDomain = keka_domain as string;
                   const url = kekaDomain.startsWith("http")
                     ? kekaDomain
@@ -176,6 +177,7 @@ function App() {
 
               {activeTab === "today" && (
                 <TodayOverview
+                  accessToken={accessToken}
                   loading={appLoading}
                   error={appError}
                   metrics={metrics}
@@ -184,7 +186,7 @@ function App() {
                   timePairs={timePairs}
                   breaks={breaks}
                   unpairedInEntry={unpairedInEntry}
-                  totalWorkedMinutes={totalWorkedMinutes}
+                  totalWorkedSeconds={totalWorkedSeconds}
                   hoursNeededPerDay={weeklyStats.hoursNeededPerDay}
                 />
               )}

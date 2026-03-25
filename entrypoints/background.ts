@@ -1,9 +1,11 @@
 // Background service worker for continuous Keka monitoring and notifications
 import { browser } from "wxt/browser";
 import type { NotificationStates } from "../utils/types";
-import { fetchAttendanceSummary, fetchHolidays, fetchLeaveSummary } from "../utils/api";
-import { calculateMetrics, processMonthlyStats } from "../utils/calculations";
-import { format } from "date-fns";
+import { fetchAttendanceSummary, fetchHolidays, fetchLeaveSummary, fetchRangeStats } from "../utils/api";
+import { calculateMetrics, processMonthlyStats, processWeeklyStats } from "../utils/calculations";
+import { getRandomMessage } from "../utils/notificationMessages";
+import { getRelevantMeme, shouldShowMeme, type MemeNotificationType } from "../utils/memes";
+import { format, startOfWeek, endOfWeek } from "date-fns";
 
 // Get current date/week keys
 function getCurrentDay(): string {
@@ -14,8 +16,47 @@ function getCurrentWeek(): string {
   return `week_${new Date().getFullYear()}-${Math.floor(new Date().getDate() / 7)}`;
 }
 
-// Optimized notification helper
-async function showNotification(title: string, message: string, requireInteraction = false) {
+// Play notification sound via Offscreen Document (service workers can't use Audio API directly)
+let offscreenCreated = false;
+
+async function ensureOffscreenDocument() {
+  if (offscreenCreated) return;
+  try {
+    // Check if an offscreen document already exists
+    const existingContexts = await (browser as any).runtime.getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+    });
+    if (existingContexts && existingContexts.length > 0) {
+      offscreenCreated = true;
+      return;
+    }
+    await (browser as any).offscreen.createDocument({
+      url: "sound-player.html",
+      reasons: ["AUDIO_PLAYBACK"],
+      justification: "Play notification sound when alerts fire",
+    });
+    offscreenCreated = true;
+  } catch (error) {
+    // May fail if document already exists (race condition) — that's fine
+    if ((error as Error)?.message?.includes("single offscreen")) {
+      offscreenCreated = true;
+    } else {
+      console.error("Error creating offscreen document:", error);
+    }
+  }
+}
+
+async function playNotificationSound() {
+  try {
+    await ensureOffscreenDocument();
+    await browser.runtime.sendMessage({ type: "PLAY_NOTIFICATION_SOUND" });
+  } catch (error) {
+    console.error("Error playing notification sound:", error);
+  }
+}
+
+// Optimized notification helper (supports optional meme images)
+async function showNotification(title: string, message: string, requireInteraction = false, imageUrl?: string | null) {
   try {
     const { notifications_enabled } = await browser.storage.local.get("notifications_enabled");
     if (notifications_enabled !== true) {
@@ -26,14 +67,32 @@ async function showNotification(title: string, message: string, requireInteracti
       console.error("Notifications API not available");
       return;
     }
-    await browser.notifications.create({
-      type: "basic",
-      iconUrl: "icon/128.png",
-      title,
-      message,
-      requireInteraction,
-      silent: false,
-    });
+
+
+    // Use image-type notification when a meme URL is available
+    if (imageUrl) {
+      await browser.notifications.create({
+        type: "image",
+        iconUrl: "icon/128.png",
+        title,
+        message,
+        imageUrl,
+        requireInteraction,
+        silent: true,
+      });
+    } else {
+      await browser.notifications.create({
+        type: "basic",
+        iconUrl: "icon/128.png",
+        title,
+        message,
+        requireInteraction,
+        silent: true, // Suppress OS sound — we play our own
+      });
+    }
+
+    // Play custom notification sound via offscreen document
+    await playNotificationSound();
   } catch (error) {
     console.error("Error showing notification:", error);
   }
@@ -67,6 +126,7 @@ async function getNotificationStates(): Promise<NotificationStates> {
     `lunch_break_notified_${currentDay}`,
     `tea_break_notified_${currentDay}`,
     `average_target_notified_${currentDay}`,
+    `weekly_average_target_notified_${currentDay}`,
     `token_expired_notified_${currentDay}`
   ];
 
@@ -83,7 +143,8 @@ async function getNotificationStates(): Promise<NotificationStates> {
     lunchBreakNotifiedToday: Boolean(result[keys[7]]),
     teaBreakNotifiedToday: Boolean(result[keys[8]]),
     averageTargetNotifiedToday: Boolean(result[keys[9]]),
-    tokenExpiredNotifiedToday: Boolean(result[keys[10]]),
+    weeklyAverageTargetNotifiedToday: Boolean(result[keys[10]]),
+    tokenExpiredNotifiedToday: Boolean(result[keys[11]]),
   };
 }
 
@@ -102,6 +163,7 @@ async function updateNotificationState(stateKey: keyof NotificationStates, value
     lunchBreakNotifiedToday: `lunch_break_notified_${currentDay}`,
     teaBreakNotifiedToday: `tea_break_notified_${currentDay}`,
     averageTargetNotifiedToday: `average_target_notified_${currentDay}`,
+    weeklyAverageTargetNotifiedToday: `weekly_average_target_notified_${currentDay}`,
     tokenExpiredNotifiedToday: `token_expired_notified_${currentDay}`,
   };
 
@@ -154,7 +216,7 @@ async function handleTokenExpiration(accessToken: string) {
     if (!tokenExpiredNotifiedToday) {
       await showNotification(
         "Session Expired ⚠️",
-        "Please open Keka to refresh your daily session and resume tracking.",
+        getRandomMessage("sessionExpired"),
         true // require interaction so they see it
       );
       await updateNotificationState("tokenExpiredNotifiedToday", true);
@@ -169,7 +231,7 @@ async function handleTokenExpiration(accessToken: string) {
 async function runNotificationLogic() {
   try {
     const currentDay = getCurrentDay();
-    const storageKeys = ['access_token', `halfDay_${currentDay}`, 'attendance_data'];
+    const storageKeys = ['access_token', `halfDay_${currentDay}`, 'attendance_data', 'current_total_worked_seconds', 'lunch_time', 'memes_enabled', 'holidays_cache', 'leave_cache'];
     const storageData = await browser.storage.local.get(storageKeys);
 
     const accessToken = storageData.access_token as string;
@@ -184,14 +246,33 @@ async function runNotificationLogic() {
     const storedAttendanceData = storageData.attendance_data;
 
     // Fetch fresh data
-    // optimization: maybe we don't need holidays and leave EVERY minute, but for correctness of average calcs we fetch them.
-    // In a real app we might cache these for the day.
     let attendanceData, holidaysData;
+    let holidaysFetchNeeded = false;
+    
+    const holidaysCache = storageData.holidays_cache as { data: any, timestamp: number } | undefined;
+    holidaysData = holidaysCache?.data;
+    if (!holidaysData || !holidaysCache?.timestamp || (Date.now() - holidaysCache.timestamp > 4 * 60 * 60 * 1000)) {
+        holidaysFetchNeeded = true;
+    }
+
     try {
-      [attendanceData, holidaysData] = await Promise.all([
-        fetchAttendanceSummary(accessToken),
-        fetchHolidays(accessToken)
-      ]);
+      const promises: Promise<any>[] = [fetchAttendanceSummary(accessToken)];
+      if (holidaysFetchNeeded) {
+          promises.push(fetchHolidays(accessToken));
+      }
+      
+      const results = await Promise.all(promises);
+      attendanceData = results[0];
+      
+      if (holidaysFetchNeeded) {
+          holidaysData = results[1];
+          await browser.storage.local.set({
+              holidays_cache: {
+                  data: holidaysData,
+                  timestamp: Date.now()
+              }
+          });
+      }
     } catch (error) {
       // Whether specific 'Unauthorized' or generic failure, handle as potential expiration
       // and suppress error logging to keep extension logs clean.
@@ -206,7 +287,24 @@ async function runNotificationLogic() {
     try {
       const now = new Date();
       const currentDateStr = format(now, "yyyy-MM-dd");
-      leaveData = await fetchLeaveSummary(accessToken, currentDateStr);
+      
+      const leaveCache = storageData.leave_cache as { data: any, date: string, timestamp: number } | undefined;
+      leaveData = leaveCache?.data;
+      const leaveCacheValid = leaveData && 
+                             leaveCache?.date === currentDateStr && 
+                             leaveCache?.timestamp && 
+                             (Date.now() - leaveCache.timestamp < 4 * 60 * 60 * 1000);
+
+      if (!leaveCacheValid) {
+          leaveData = await fetchLeaveSummary(accessToken, currentDateStr);
+          await browser.storage.local.set({
+              leave_cache: {
+                  data: leaveData,
+                  date: currentDateStr,
+                  timestamp: Date.now()
+              }
+          });
+      }
     } catch (e) {
       // Silently ignore leave data fetch failures
       /*
@@ -223,17 +321,22 @@ async function runNotificationLogic() {
     }
 
     // Calculate current metrics
-    const { metrics, totalWorkedMinutes, isClockedIn, leaveTimeInfo } = calculateMetrics(attendanceData, isHalfDay);
+    const { metrics, totalWorkedSeconds, isClockedIn, leaveTimeInfo } = calculateMetrics(attendanceData, isHalfDay);
+    const totalWorkedMinutes = Math.floor(totalWorkedSeconds / 60);
 
     // Calculate monthly stats for "Average Target"
     const monthlyStats = processMonthlyStats(attendanceData, holidaysData, leaveData);
     const hoursNeededPerDay = monthlyStats.hoursNeededPerDay;
 
+    // Calculate weekly stats for "Weekly Average Target"
+    const weeklyStats = processWeeklyStats(attendanceData, holidaysData, leaveData, isHalfDay, new Date());
+    const weeklyHoursNeededPerDay = weeklyStats.hoursNeededPerDay;
+
     // Get notification states
     const notificationStates = await getNotificationStates();
 
     const targetMinutes = isHalfDay ? 4 * 60 + 30 : 8 * 60 + 15;
-    const notificationsToShow: Array<{ title: string; message: string; stateKey: keyof NotificationStates; newValue: any }> = [];
+    const notificationsToShow: Array<{ title: string; message: string; stateKey: keyof NotificationStates; newValue: any; memeType?: MemeNotificationType }> = [];
     const nowLocal = new Date();
     const currentHour = nowLocal.getHours();
     const currentMinute = nowLocal.getMinutes();
@@ -242,19 +345,18 @@ async function runNotificationLogic() {
     if (!notificationStates.completionNotifiedToday) {
       const justCompleted = totalWorkedMinutes >= targetMinutes;
       if (justCompleted) {
-        const message = isHalfDay
-          ? "You've completed your half day target! 🎉"
-          : "You've completed your full day target (8h 15m)! 🎉";
+        const completionType = isHalfDay ? "completionHalfDay" : "completion";
         notificationsToShow.push({
           title: "Work Target Completed! 🎯",
-          message,
+          message: getRandomMessage(completionType),
           stateKey: "completionNotifiedToday",
-          newValue: true
+          newValue: true,
+          memeType: completionType
         });
       }
     }
 
-    // 2. Average Target Met (Happy Sense)
+    // 2. Average Target Met (Monthly)
     // Only if hoursNeededPerDay is available and LESS than the standard 8h 15m (8.25)
     // and user has reached that target.
     if (!notificationStates.averageTargetNotifiedToday && hoursNeededPerDay !== null) {
@@ -264,10 +366,28 @@ async function runNotificationLogic() {
         const neededMinutes = Math.ceil(hoursNeededPerDay * 60);
         if (totalWorkedMinutes >= neededMinutes) {
           notificationsToShow.push({
-            title: "Daily Average Met! 🌟",
-            message: "Great job today! 🎉 You’ve already hit your daily average. Feel free to wrap up whenever you’re ready — your monthly 8h 15m average is still on track! 🥳",
+            title: "Monthly Average Met! 🌟",
+            message: getRandomMessage("monthlyAverage"),
             stateKey: "averageTargetNotifiedToday",
-            newValue: true
+            newValue: true,
+            memeType: "monthlyAverage"
+          });
+        }
+      }
+    }
+
+    // 2b. Average Target Met (Weekly)
+    if (!notificationStates.weeklyAverageTargetNotifiedToday && weeklyHoursNeededPerDay !== null) {
+      const standardTargetHours = 8.25;
+      if (weeklyHoursNeededPerDay < standardTargetHours) {
+        const neededMinutes = Math.ceil(weeklyHoursNeededPerDay * 60);
+        if (totalWorkedMinutes >= neededMinutes) {
+          notificationsToShow.push({
+            title: "Weekly Average Met! 🌟",
+            message: getRandomMessage("weeklyAverage"),
+            stateKey: "weeklyAverageTargetNotifiedToday",
+            newValue: true,
+            memeType: "weeklyAverage"
           });
         }
       }
@@ -290,9 +410,10 @@ async function runNotificationLogic() {
 
         notificationsToShow.push({
           title: "Overtime Alert! ⏰",
-          message: `You've worked ${timeString} overtime. Consider taking a break or logging out.`,
+          message: `${getRandomMessage("overtime")} (${timeString} overtime)`,
           stateKey: "lastOvertimeNotifiedMinutes",
-          newValue: currentOvertimeBase
+          newValue: currentOvertimeBase,
+          memeType: "overtime"
         });
 
         // Also set the boolean flag for backward compatibility or general status
@@ -314,27 +435,41 @@ async function runNotificationLogic() {
       if (isTooLong) {
         notificationsToShow.push({
           title: "Long Work Session Alert! ⚠️",
-          message: "You've been clocked in for 9+ hours. Remember to take breaks and prioritize your well-being!",
+          message: getRandomMessage("clockedInTooLong"),
           stateKey: "clockedInTooLongNotifiedToday",
-          newValue: true
+          newValue: true,
+          memeType: "clockedInTooLong"
         });
       }
     }
 
-    // 5. Lunch Break (12:30 PM)
-    if (!notificationStates.lunchBreakNotifiedToday && isClockedIn) {
-      // Trigger at 12:30 PM (handle a simpler window to ensure we catch it if timer slightly off)
-      // Check if time is >= 12:30 and < 13:00 (broad window, but flag prevents repeat)
-      // Or strictly 12:30-12:35
-      if (currentHour === 12 && currentMinute >= 30) {
+    // 5. Lunch Break
+    // if (!notificationStates.lunchBreakNotifiedToday && isClockedIn) {
+    if (!notificationStates.lunchBreakNotifiedToday) {
+      const lunchTimeSetting = (storageData.lunch_time as string) || "12:30";
+      const [lunchHourStr, lunchMinuteStr] = lunchTimeSetting.split(":");
+      const parsedHour = parseInt(lunchHourStr, 10);
+      const lunchHour = isNaN(parsedHour) ? 12 : parsedHour;
+      const parsedMin = parseInt(lunchMinuteStr, 10);
+      const lunchMinute = isNaN(parsedMin) ? 30 : parsedMin;
+
+      const currentTotalMinutes = currentHour * 60 + currentMinute;
+      const lunchTotalMinutes = lunchHour * 60 + lunchMinute;
+
+      if (currentTotalMinutes >= lunchTotalMinutes) {
+        const period = lunchHour >= 12 ? "PM" : "AM";
+        const formatHour = lunchHour % 12 || 12;
+        const formatMin = lunchMinute.toString().padStart(2, "0");
+        const timeString = `${formatHour}:${formatMin} ${period}`;
+
         notificationsToShow.push({
           title: "Lunch Break! 🥗",
-          message: "It's 12:30 PM. Time to grab some lunch and recharge! 🍱",
+          message: `It's ${timeString} — ${getRandomMessage("lunch")}`,
           stateKey: "lunchBreakNotifiedToday",
-          newValue: true
+          newValue: true,
+          memeType: "lunch"
         });
       }
-      // If user started AFTER 12:30, they might get this immediately? Yes, if isClockedIn. That seems acceptable.
     }
 
     // 6. Tea Break (4:00 PM)
@@ -343,9 +478,10 @@ async function runNotificationLogic() {
       if (currentHour >= 16) {
         notificationsToShow.push({
           title: "Tea Break! ☕",
-          message: "It's 4:00 PM. Take a short break for tea/coffee! 🫖",
+          message: getRandomMessage("tea"),
           stateKey: "teaBreakNotifiedToday",
-          newValue: true
+          newValue: true,
+          memeType: "tea"
         });
       }
     }
@@ -373,14 +509,40 @@ async function runNotificationLogic() {
           if (timeUntilLeave <= 30 && timeUntilLeave > 0) {
             notificationsToShow.push({
               title: "Leave Time Approaching! 🏠",
-              message: `Your leave time (${leaveTimeInfo.normalLeaveTime}) is approaching. Start wrapping up your work.`,
+              message: `${getRandomMessage("leaveApproaching")} (leave at ${leaveTimeInfo.normalLeaveTime})`,
               stateKey: "leaveTimeApproachingNotifiedToday",
-              newValue: true
+              newValue: true,
+              memeType: "leaveApproaching"
             });
           }
         }
       } catch (error) {
         console.error("Error calculating leave time:", error);
+      }
+    }
+
+    // 8. Weekly Summary (Fridays only)
+    if (!notificationStates.weeklySummaryNotified && nowLocal.getDay() === 5) {
+      try {
+        const weekStart = format(startOfWeek(nowLocal, { weekStartsOn: 1 }), "yyyy-MM-dd");
+        const weekEnd = format(endOfWeek(nowLocal, { weekStartsOn: 1 }), "yyyy-MM-dd");
+        const rangeStats = await fetchRangeStats(accessToken, weekStart, weekEnd);
+        const weeklyAvg = rangeStats?.data?.myStats?.averageHoursPerDayInHHMM;
+        const totalHours = rangeStats?.data?.myStats?.totalEffectiveHoursInHHMM;
+
+        const message = totalHours
+          ? `This week's total: ${totalHours} (avg ${weeklyAvg}/day). ${getRandomMessage("weeklySummary")}`
+          : getRandomMessage("weeklySummary");
+
+        notificationsToShow.push({
+          title: "End of Week Summary 📈",
+          message,
+          stateKey: "weeklySummaryNotified",
+          newValue: true,
+          memeType: "weeklySummary"
+        });
+      } catch (e) {
+        // Silently ignore — weekly summary is non-critical
       }
     }
 
@@ -391,20 +553,34 @@ async function runNotificationLogic() {
       for (const notification of notificationsToShow) {
         // Show notification only if it has a title/message (might be internal update)
         if (notification.title && notification.message) {
-          await showNotification(notification.title, notification.message);
+          // Occasionally fetch a context-relevant meme (~25% of the time)
+          let memeUrl: string | null = null;
+          const memesEnabled = !!storageData.memes_enabled;
+          if (memesEnabled && notification.memeType && shouldShowMeme()) {
+            try {
+              memeUrl = await getRelevantMeme(notification.memeType);
+            } catch {
+              // Silently ignore — meme is a nice-to-have
+            }
+          }
+          await showNotification(notification.title, notification.message, false, memeUrl);
         }
         await updateNotificationState(notification.stateKey, notification.newValue);
       }
     }
 
     // Check if data actually changed to avoid unnecessary storage writes and UI jitter
-    const hasDataChanged = JSON.stringify(attendanceData) !== JSON.stringify(storedAttendanceData);
+    // Also check if storedTotalSeconds is different (e.g. for seconds update or migration)
+    const storedTotalSeconds = storageData.current_total_worked_seconds;
+    const hasDataChanged =
+      JSON.stringify(attendanceData) !== JSON.stringify(storedAttendanceData) ||
+      storedTotalSeconds !== totalWorkedSeconds;
 
     if (hasDataChanged) {
       // Store current metrics in storage for the popup to read
       await browser.storage.local.set({
         current_metrics: metrics,
-        current_total_worked_minutes: totalWorkedMinutes,
+        current_total_worked_seconds: totalWorkedSeconds,
         current_is_clocked_in: isClockedIn,
         current_leave_time_info: leaveTimeInfo,
         attendance_data: attendanceData,
@@ -427,10 +603,21 @@ export default defineBackground(() => {
     return;
   }
 
-  // Message handling for communication with popup
+  // Message handling for communication with popup and content scripts
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'FORCE_CHECK') {
       runNotificationLogic();
+      sendResponse({ success: true });
+    } else if (message.type === 'TOKEN_UPDATE' && message.token) {
+      // Content script proactively sent a new token
+      browser.storage.local.get("access_token").then((data) => {
+        if (data.access_token !== message.token) {
+          browser.storage.local.set({ access_token: message.token }).then(() => {
+            console.log("Token updated from content script. Triggering check.");
+            runNotificationLogic();
+          });
+        }
+      });
       sendResponse({ success: true });
     }
     return true;

@@ -30,6 +30,7 @@ export interface Metrics {
   totalWorkedStatus: "yellow" | "green" | "red";
   isOvertime: boolean;
   overtimeMinutes: number;
+  overtimeSeconds: number;
 }
 
 export interface LeaveTimeInfo {
@@ -48,6 +49,7 @@ export interface NotificationStates {
   lunchBreakNotifiedToday: boolean;
   teaBreakNotifiedToday: boolean;
   averageTargetNotifiedToday: boolean;
+  weeklyAverageTargetNotifiedToday: boolean;
   tokenExpiredNotifiedToday: boolean;
 }
 
@@ -64,23 +66,28 @@ export interface NotificationServiceProps {
   currentWorkingDay: number | null;
   remainingWorkingDays: number | null;
   averageHours: number | null;
+  weeklyHoursNeededPerDay?: number | null;
   notificationStates: NotificationStates;
   setNotificationStates: React.Dispatch<
     React.SetStateAction<NotificationStates>
   >;
 }
 
+
 export interface TimePair {
   startTime: string;
   endTime: string;
   duration: string;
   durationMinutes: number;
+  durationSeconds: number;
 }
 
 export interface Break {
   startTime: string;
   endTime: string;
   duration: string;
+  durationMinutes: number;
+  durationSeconds: number;
 }
 
 export interface Holiday {
