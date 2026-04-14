@@ -50,8 +50,13 @@ export default function TodayOverview({
   const isToday = isSameDay(selectedDate, new Date());
 
   const formatTargetHours = (hoursNeeded: number) => {
-    const hours = Math.floor(hoursNeeded);
-    const minutes = Math.round((hoursNeeded - hours) * 60);
+    let hours = Math.floor(hoursNeeded);
+    let minutes = Math.round((hoursNeeded - hours) * 60);
+
+    if (minutes === 60) {
+      hours += 1;
+      minutes = 0;
+    }
 
     return `${hours}h ${minutes}m`;
   };
@@ -73,6 +78,21 @@ export default function TodayOverview({
 
     return `${hours12}:${minutes} ${ampm}`;
   };
+
+  const renderAverageTargetCard = (label: string, hoursNeeded: number) => (
+    <div
+      className="leave-card"
+      style={{ borderColor: "#818cf8", backgroundColor: "#e0e7ff" }}
+    >
+      <div className="leave-label" style={{ color: "#3730a3" }}>
+        {label}
+      </div>
+      <div className="leave-sub-label" style={{ color: "#4338ca" }}>
+        ({formatTargetHours(hoursNeeded)})
+      </div>
+      <div className="leave-time">{getTargetLeaveTime(hoursNeeded)}</div>
+    </div>
+  );
 
   const handlePrevDay = () => {
     setSelectedDate(subDays(selectedDate, 1));
@@ -247,37 +267,17 @@ export default function TodayOverview({
             </div>
             {weeklyHoursNeededPerDay !== null &&
               weeklyHoursNeededPerDay > 0 && (
-                <div
-                  className="leave-card"
-                  style={{ borderColor: "#818cf8", backgroundColor: "#e0e7ff" }}
-                >
-                  <div className="leave-label" style={{ color: "#3730a3" }}>
-                    Weekly Avg Target
-                  </div>
-                  <div className="leave-sub-label" style={{ color: "#4338ca" }}>
-                    ({formatTargetHours(weeklyHoursNeededPerDay)})
-                  </div>
-                  <div className="leave-time">
-                    {getTargetLeaveTime(weeklyHoursNeededPerDay)}
-                  </div>
-                </div>
+                renderAverageTargetCard(
+                  "Weekly Avg Target",
+                  weeklyHoursNeededPerDay
+                )
               )}
             {monthlyHoursNeededPerDay !== null &&
               monthlyHoursNeededPerDay > 0 && (
-                <div
-                  className="leave-card"
-                  style={{ borderColor: "#818cf8", backgroundColor: "#e0e7ff" }}
-                >
-                  <div className="leave-label" style={{ color: "#3730a3" }}>
-                    Monthly Avg Target
-                  </div>
-                  <div className="leave-sub-label" style={{ color: "#4338ca" }}>
-                    ({formatTargetHours(monthlyHoursNeededPerDay)})
-                  </div>
-                  <div className="leave-time">
-                    {getTargetLeaveTime(monthlyHoursNeededPerDay)}
-                  </div>
-                </div>
+                renderAverageTargetCard(
+                  "Monthly Avg Target",
+                  monthlyHoursNeededPerDay
+                )
               )}
           </div>
         </div>
