@@ -1,8 +1,13 @@
 import { useState, useEffect } from "react";
 import { format } from "date-fns";
 import { fetchAttendanceSummary } from "../../../utils/api";
-import { calculateMetrics, calculateTimePairsAndBreaks } from "../../../utils/calculations";
+import {
+  calculateLeaveTimeInfo,
+  calculateTimePairsAndBreaks,
+  generateMetricsFromSeconds,
+} from "../../../utils/calculations";
 import type { Metrics, LeaveTimeInfo, TimePair, Break, TimeEntry } from "../../../utils/types";
+import type { WorkHoursConfig } from "../../../utils/workHoursConfig";
 
 interface UseDailyStatsResult {
   metrics: Metrics | null;
@@ -20,6 +25,7 @@ export const useDailyStats = (
   accessToken: string | null,
   isHalfDay: boolean,
   selectedDate: Date,
+  workHoursConfig: WorkHoursConfig,
   enabled: boolean
 ): UseDailyStatsResult => {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
@@ -66,41 +72,34 @@ export const useDailyStats = (
         setBreaks(calculatedPairs.breaks);
         setUnpairedInEntry(calculatedPairs.unpairedInEntry);
 
-        // For past days, we calculate the total worked time based purely on the exact pairs, plus any unpaired entry without extrapolation
+        // For past days, calculate worked time without extrapolation.
         let totalWorkedSecs = calculatedPairs.timePairs.reduce(
           (sum, pair) => sum + (pair.durationSeconds || 0),
           0
         );
-        
-        // OR better yet, let's use the calculateMetrics utility, but since it's a past day, it won't extrapolate if we bypass the extrapolator, or we just rely on calculateMetrics which extrapolates, but we should override the seconds with totalEffectiveHours if Keka provides it, OR we just let calculateMetrics do it's thing but we freeze it at that moment.
-        // Actually, calculateMetrics calls calculateSecondsFromAttendance which extrapolates using new Date() for any unpairedInEntry.
-        // For past days, an unpairedInEntry shouldn't tick up to `new Date()`. But typically past days don't have unpaired entries unless there's an error in punching.
-        
-        // Alternatively, use Keka's totalEffectiveHours if available
+
+        // Prefer Keka's own totalEffectiveHours when available.
         const attendanceEntry = exactDayData[0]; // Assuming length 1 for a single day fetch or the relevant one
-        
-        if (attendanceEntry.totalEffectiveHours && typeof attendanceEntry.totalEffectiveHours === 'number' && attendanceEntry.totalEffectiveHours > 0) {
-            totalWorkedSecs = Math.floor(attendanceEntry.totalEffectiveHours * 3600);
-        } else {
-            // Recalculate without extrapolating
-            totalWorkedSecs = calculatedPairs.timePairs.reduce(
-                (sum, pair) => sum + (pair.durationSeconds || 0),
-                0
-            );
+
+        if (
+          typeof attendanceEntry.totalEffectiveHours === "number" &&
+          Number.isFinite(attendanceEntry.totalEffectiveHours) &&
+          attendanceEntry.totalEffectiveHours >= 0
+        ) {
+          totalWorkedSecs = Math.floor(attendanceEntry.totalEffectiveHours * 3600);
         }
 
-        const calculatedMetricsData = calculateMetrics(exactDayData, isHalfDay);
-
-        // However, calculateMetrics might have wrong totalWorkedSeconds because of extrapolation, so we overwrite it with our calculated one.
-        const correctMetrics = {
-             ...calculatedMetricsData.metrics,
-             // Regenerate some formatted strings based on the static totalWorkedSecs
-        };
-        
-        // Re-generate metrics from static seconds
-        const { generateMetricsFromSeconds, calculateLeaveTimeInfo } = await import("../../../utils/calculations");
-        const finalMetrics = generateMetricsFromSeconds(totalWorkedSecs, isHalfDay, false);
-        const finalLeaveInfo = calculateLeaveTimeInfo(totalWorkedSecs, isHalfDay);
+        const finalMetrics = generateMetricsFromSeconds(
+          totalWorkedSecs,
+          isHalfDay,
+          false,
+          workHoursConfig,
+        );
+        const finalLeaveInfo = calculateLeaveTimeInfo(
+          totalWorkedSecs,
+          isHalfDay,
+          workHoursConfig,
+        );
 
         setMetrics(finalMetrics);
         setTotalWorkedSeconds(totalWorkedSecs);
@@ -119,7 +118,7 @@ export const useDailyStats = (
     };
 
     fetchStats();
-  }, [accessToken, isHalfDay, selectedDate, enabled]);
+  }, [accessToken, isHalfDay, selectedDate, workHoursConfig, enabled]);
 
   return {
     metrics,

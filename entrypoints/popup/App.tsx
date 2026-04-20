@@ -9,11 +9,14 @@ import { browser } from "wxt/browser";
 import { useAuth } from "./hooks/useAuth";
 import { useCurrentMetrics } from "./hooks/useCurrentMetrics";
 import { useHalfDay } from "./hooks/useHalfDay";
+import { useWorkHoursConfig } from "./hooks/useWorkHoursConfig";
 
 import { useWeeklyStats } from "./hooks/useWeeklyStats";
 import { useMonthlyStats } from "./hooks/useMonthlyStats";
 import WeeklyOverview from "./components/WeeklyOverview";
 import { Settings as SettingsIcon, X } from "lucide-react";
+
+const SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY = "show_monthly_avg_target";
 
 function App() {
   const { accessToken, loading: authLoading, error: authError } = useAuth();
@@ -22,19 +25,28 @@ function App() {
   const [activeView, setActiveView] = useState<
     "main" | "settings" | "setup" | "loading"
   >("loading");
+  const [showMonthlyAvgTarget, setShowMonthlyAvgTarget] = useState(false);
 
   useEffect(() => {
     const checkSetup = async () => {
-      const { keka_domain, keka_font_preference } =
+      const {
+        keka_domain,
+        keka_font_preference,
+        show_monthly_avg_target,
+      } =
         await browser.storage.local.get([
           "keka_domain",
           "keka_font_preference",
+          SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY,
         ]);
 
       if (keka_font_preference === "mono") {
         document.body.classList.add("font-mono");
       } else {
         document.body.classList.remove("font-mono");
+      }
+      if (typeof show_monthly_avg_target === "boolean") {
+        setShowMonthlyAvgTarget(show_monthly_avg_target);
       }
 
       if (keka_domain) {
@@ -44,9 +56,44 @@ function App() {
       }
     };
     checkSetup();
+
+    const handleStorageChange = (
+      changes: Record<string, { newValue?: unknown }>,
+      areaName: string,
+    ) => {
+      if (
+        areaName === "local" &&
+        changes[SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY] &&
+        typeof changes[SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY].newValue ===
+          "boolean"
+      ) {
+        setShowMonthlyAvgTarget(
+          changes[SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY].newValue as boolean,
+        );
+      }
+    };
+
+    browser.storage.onChanged.addListener(handleStorageChange);
+    return () => {
+      browser.storage.onChanged.removeListener(handleStorageChange);
+    };
   }, []);
 
+  const handleShowMonthlyAvgTargetChange = async (value: boolean) => {
+    const previousValue = showMonthlyAvgTarget;
+    setShowMonthlyAvgTarget(value);
+    try {
+      await browser.storage.local.set({
+        [SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY]: value,
+      });
+    } catch (error) {
+      console.error("Error saving monthly target visibility:", error);
+      setShowMonthlyAvgTarget(previousValue);
+    }
+  };
+
   const { isHalfDay, setIsHalfDay } = useHalfDay();
+  const { workHoursConfig, loading: workHoursLoading } = useWorkHoursConfig();
 
   const {
     metrics,
@@ -58,7 +105,7 @@ function App() {
     loading: metricsLoading,
     error: metricsError,
     totalWorkedSeconds,
-  } = useCurrentMetrics(isHalfDay);
+  } = useCurrentMetrics(isHalfDay, workHoursConfig);
 
   const [activeTab, setActiveTab] = useState<"today" | "weekly" | "monthly">(
     "today"
@@ -66,11 +113,17 @@ function App() {
 
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [currentDate] = useState(new Date());
-  const weeklyStats = useWeeklyStats(accessToken, isHalfDay, currentDate);
-  const monthlyStats = useMonthlyStats(accessToken, currentDate);
+  const weeklyStats = useWeeklyStats(
+    accessToken,
+    isHalfDay,
+    currentDate,
+    workHoursConfig,
+  );
+  const monthlyStats = useMonthlyStats(accessToken, currentDate, workHoursConfig);
 
   // Combine loading/error states appropriately
-  const appLoading = authLoading || (activeTab === "today" && metricsLoading);
+  const appLoading =
+    authLoading || workHoursLoading || (activeTab === "today" && metricsLoading);
   // If we have an auth error, we shouldn't even try to show metrics error yet
   const appError = activeTab === "today" ? metricsError : null;
 
@@ -191,6 +244,8 @@ function App() {
                   totalWorkedSeconds={totalWorkedSeconds}
                   weeklyHoursNeededPerDay={weeklyStats.hoursNeededPerDay}
                   monthlyHoursNeededPerDay={monthlyStats.hoursNeededPerDay}
+                  showMonthlyAvgTarget={showMonthlyAvgTarget}
+                  workHoursConfig={workHoursConfig}
                 />
               )}
 
@@ -198,6 +253,7 @@ function App() {
                 <WeeklyOverview
                   accessToken={accessToken}
                   isHalfDay={isHalfDay}
+                  workHoursConfig={workHoursConfig}
                 />
               )}
 
@@ -206,6 +262,7 @@ function App() {
                   accessToken={accessToken}
                   selectedMonth={selectedMonth}
                   onMonthChange={setSelectedMonth}
+                  workHoursConfig={workHoursConfig}
                 />
               )}
             </>
@@ -215,7 +272,12 @@ function App() {
 
       {/* Settings View */}
       {activeView === "settings" && (
-        <Settings isHalfDay={isHalfDay} setIsHalfDay={setIsHalfDay} />
+        <Settings
+          isHalfDay={isHalfDay}
+          setIsHalfDay={setIsHalfDay}
+          showMonthlyAvgTarget={showMonthlyAvgTarget}
+          setShowMonthlyAvgTarget={handleShowMonthlyAvgTargetChange}
+        />
       )}
     </div>
   );

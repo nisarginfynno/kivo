@@ -10,15 +10,18 @@ import {
   isSameWeek,
 } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import type { WorkHoursConfig } from "../../../utils/workHoursConfig";
 
 interface WeeklyOverviewProps {
   accessToken: string | null;
   isHalfDay: boolean;
+  workHoursConfig: WorkHoursConfig;
 }
 
 export default function WeeklyOverview({
   accessToken,
   isHalfDay,
+  workHoursConfig,
 }: WeeklyOverviewProps) {
   const [selectedDate, setSelectedDate] = useState(new Date());
 
@@ -34,7 +37,7 @@ export default function WeeklyOverview({
     totalWorkingDays,
     currentWorkingDay,
     remainingWorkingDays,
-  } = useWeeklyStats(accessToken, isHalfDay, selectedDate);
+  } = useWeeklyStats(accessToken, isHalfDay, selectedDate, workHoursConfig);
 
   const holidaysCount = holidays.length;
   const onDateChange = setSelectedDate;

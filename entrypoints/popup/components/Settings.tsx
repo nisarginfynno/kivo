@@ -1,13 +1,26 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { browser } from "wxt/browser";
 import { getRelevantMeme } from "../../../utils/memes";
+import {
+  DEFAULT_WORK_HOURS_CONFIG,
+  WORK_HOURS_CONFIG_STORAGE_KEY,
+  normalizeWorkHoursConfig,
+  type WorkHoursConfig,
+} from "../../../utils/workHoursConfig";
 
 interface SettingsProps {
   isHalfDay: boolean;
   setIsHalfDay: (value: boolean) => void;
+  showMonthlyAvgTarget: boolean;
+  setShowMonthlyAvgTarget: (value: boolean) => void | Promise<void>;
 }
 
-export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
+export default function Settings({
+  isHalfDay,
+  setIsHalfDay,
+  showMonthlyAvgTarget,
+  setShowMonthlyAvgTarget,
+}: SettingsProps) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [memesEnabled, setMemesEnabled] = useState(false);
   const [domain, setDomain] = useState("");
@@ -15,33 +28,55 @@ export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
   const [saveStatus, setSaveStatus] = useState<string>("");
   const [fontPreference, setFontPreference] = useState<"sans" | "mono">("sans");
   const [lunchTime, setLunchTime] = useState("12:30");
+  const [fullDayTargetMinutes, setFullDayTargetMinutes] = useState(
+    DEFAULT_WORK_HOURS_CONFIG.fullDayMinutes,
+  );
+  const [halfDayTargetMinutes, setHalfDayTargetMinutes] = useState(
+    DEFAULT_WORK_HOURS_CONFIG.halfDayMinutes,
+  );
+  const saveWorkHoursTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const MIN_TARGET_MINUTES = 30;
 
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const { notifications_enabled, keka_domain, memes_enabled } =
-          await browser.storage.local.get([
-            "notifications_enabled",
-            "keka_domain",
-            "memes_enabled",
-          ]);
+        const storedSettings = await browser.storage.local.get([
+          "notifications_enabled",
+          "keka_domain",
+          "memes_enabled",
+          "keka_font_preference",
+          "lunch_time",
+          WORK_HOURS_CONFIG_STORAGE_KEY,
+        ]);
+        const {
+          notifications_enabled,
+          keka_domain,
+          memes_enabled,
+          keka_font_preference,
+          lunch_time,
+        } = storedSettings;
         setNotificationsEnabled(!!notifications_enabled);
         setMemesEnabled(!!memes_enabled);
         if (keka_domain) {
           setDomain(keka_domain as string);
         }
 
-        const { keka_font_preference, lunch_time } =
-          await browser.storage.local.get([
-            "keka_font_preference",
-            "lunch_time",
-          ]);
         if (keka_font_preference) {
           setFontPreference(keka_font_preference as "sans" | "mono");
         }
         if (lunch_time) {
           setLunchTime(lunch_time as string);
         }
+
+        const normalizedWorkHours = normalizeWorkHoursConfig(
+          storedSettings[WORK_HOURS_CONFIG_STORAGE_KEY] as
+            | Partial<WorkHoursConfig>
+            | undefined,
+        );
+        setFullDayTargetMinutes(normalizedWorkHours.fullDayMinutes);
+        setHalfDayTargetMinutes(normalizedWorkHours.halfDayMinutes);
       } catch (error) {
         console.error("Error loading settings:", error);
       } finally {
@@ -49,6 +84,12 @@ export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
       }
     };
     loadSettings();
+
+    return () => {
+      if (saveWorkHoursTimeoutRef.current) {
+        clearTimeout(saveWorkHoursTimeoutRef.current);
+      }
+    };
   }, []);
 
   const handleSaveDomain = async () => {
@@ -60,6 +101,106 @@ export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
       console.error("Error saving domain:", error);
       setSaveStatus("Error saving");
     }
+  };
+
+  const persistWorkHours = async (
+    fullDayMinutes: number,
+    halfDayMinutes: number,
+  ) => {
+    try {
+      const normalized = normalizeWorkHoursConfig({
+        fullDayMinutes,
+        halfDayMinutes: Math.min(halfDayMinutes, fullDayMinutes),
+      });
+
+      await browser.storage.local.set({
+        [WORK_HOURS_CONFIG_STORAGE_KEY]: normalized,
+      });
+
+      setFullDayTargetMinutes(normalized.fullDayMinutes);
+      setHalfDayTargetMinutes(normalized.halfDayMinutes);
+
+      // Refresh background calculations immediately.
+      browser.runtime.sendMessage({ type: "FORCE_CHECK" }).catch(() => {});
+    } catch (error) {
+      console.error("Error saving work hours:", error);
+    }
+  };
+
+  const queueWorkHoursSave = (
+    nextFullDayMinutes: number,
+    nextHalfDayMinutes: number,
+  ) => {
+    if (saveWorkHoursTimeoutRef.current) {
+      clearTimeout(saveWorkHoursTimeoutRef.current);
+    }
+
+    saveWorkHoursTimeoutRef.current = setTimeout(() => {
+      void persistWorkHours(nextFullDayMinutes, nextHalfDayMinutes);
+    }, 250);
+  };
+
+  const parseNumberInput = (value: string, fallback: number): number => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const clampTargetMinutes = (targetMinutes: number): number =>
+    Math.max(MIN_TARGET_MINUTES, targetMinutes);
+
+  const handleFullDayHoursChange = (nextHoursInput: string) => {
+    const currentHours = Math.floor(fullDayTargetMinutes / 60);
+    const nextHours = Math.min(23, Math.max(0, parseNumberInput(nextHoursInput, currentHours)));
+    const minutePart = fullDayTargetMinutes % 60;
+    const nextFullDayMinutes = clampTargetMinutes(nextHours * 60 + minutePart);
+    const nextHalfDayMinutes = Math.min(halfDayTargetMinutes, nextFullDayMinutes);
+
+    setFullDayTargetMinutes(nextFullDayMinutes);
+    setHalfDayTargetMinutes(nextHalfDayMinutes);
+    queueWorkHoursSave(nextFullDayMinutes, nextHalfDayMinutes);
+  };
+
+  const handleFullDayMinutesChange = (nextMinutesInput: string) => {
+    const currentMinutes = fullDayTargetMinutes % 60;
+    const nextMinutes = Math.min(
+      59,
+      Math.max(0, parseNumberInput(nextMinutesInput, currentMinutes)),
+    );
+    const hourPart = Math.floor(fullDayTargetMinutes / 60);
+    const nextFullDayMinutes = clampTargetMinutes(hourPart * 60 + nextMinutes);
+    const nextHalfDayMinutes = Math.min(halfDayTargetMinutes, nextFullDayMinutes);
+
+    setFullDayTargetMinutes(nextFullDayMinutes);
+    setHalfDayTargetMinutes(nextHalfDayMinutes);
+    queueWorkHoursSave(nextFullDayMinutes, nextHalfDayMinutes);
+  };
+
+  const handleHalfDayHoursChange = (nextHoursInput: string) => {
+    const currentHours = Math.floor(halfDayTargetMinutes / 60);
+    const nextHours = Math.min(
+      23,
+      Math.max(0, parseNumberInput(nextHoursInput, currentHours)),
+    );
+    const minutePart = halfDayTargetMinutes % 60;
+    const nextHalfDayMinutes = clampTargetMinutes(nextHours * 60 + minutePart);
+    const safeHalfDayMinutes = Math.min(nextHalfDayMinutes, fullDayTargetMinutes);
+
+    setHalfDayTargetMinutes(safeHalfDayMinutes);
+    queueWorkHoursSave(fullDayTargetMinutes, safeHalfDayMinutes);
+  };
+
+  const handleHalfDayMinutesChange = (nextMinutesInput: string) => {
+    const currentMinutes = halfDayTargetMinutes % 60;
+    const nextMinutes = Math.min(
+      59,
+      Math.max(0, parseNumberInput(nextMinutesInput, currentMinutes)),
+    );
+    const hourPart = Math.floor(halfDayTargetMinutes / 60);
+    const nextHalfDayMinutes = clampTargetMinutes(hourPart * 60 + nextMinutes);
+    const safeHalfDayMinutes = Math.min(nextHalfDayMinutes, fullDayTargetMinutes);
+
+    setHalfDayTargetMinutes(safeHalfDayMinutes);
+    queueWorkHoursSave(fullDayTargetMinutes, safeHalfDayMinutes);
   };
 
   const toggleNotifications = async () => {
@@ -262,6 +403,137 @@ export default function Settings({ isHalfDay, setIsHalfDay }: SettingsProps) {
                 color: "inherit",
               }}
             />
+          </div>
+        </div>
+
+        <div
+          className="settings-row"
+          style={{ marginBottom: "16px", display: "block" }}
+        >
+          <div className="settings-label">Work Hours Targets</div>
+          <div className="settings-description" style={{ marginBottom: "8px" }}>
+            Configure your full day and half day targets (hours + minutes)
+          </div>
+          <div style={{ display: "grid", gap: "6px" }}>
+            <label
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <span style={{ fontSize: "12px", color: "#64748b" }}>Full Day</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={Math.floor(fullDayTargetMinutes / 60)}
+                  onChange={(e) => handleFullDayHoursChange(e.target.value)}
+                  style={{
+                    width: "56px",
+                    padding: "8px",
+                    borderRadius: "6px",
+                    border: "1px solid #e2e8f0",
+                    fontSize: "14px",
+                    backgroundColor: "#f8fafc",
+                    outline: "none",
+                    fontFamily: "inherit",
+                    color: "inherit",
+                  }}
+                />
+                <span style={{ fontSize: "12px", color: "#64748b" }}>hrs</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={59}
+                  value={fullDayTargetMinutes % 60}
+                  onChange={(e) => handleFullDayMinutesChange(e.target.value)}
+                  style={{
+                    width: "56px",
+                    padding: "8px",
+                    borderRadius: "6px",
+                    border: "1px solid #e2e8f0",
+                    fontSize: "14px",
+                    backgroundColor: "#f8fafc",
+                    outline: "none",
+                    fontFamily: "inherit",
+                    color: "inherit",
+                  }}
+                />
+                <span style={{ fontSize: "12px", color: "#64748b" }}>mins</span>
+              </div>
+            </label>
+            <label
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <span style={{ fontSize: "12px", color: "#64748b" }}>Half Day</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={Math.floor(halfDayTargetMinutes / 60)}
+                  onChange={(e) => handleHalfDayHoursChange(e.target.value)}
+                  style={{
+                    width: "56px",
+                    padding: "8px",
+                    borderRadius: "6px",
+                    border: "1px solid #e2e8f0",
+                    fontSize: "14px",
+                    backgroundColor: "#f8fafc",
+                    outline: "none",
+                    fontFamily: "inherit",
+                    color: "inherit",
+                  }}
+                />
+                <span style={{ fontSize: "12px", color: "#64748b" }}>hrs</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={59}
+                  value={halfDayTargetMinutes % 60}
+                  onChange={(e) => handleHalfDayMinutesChange(e.target.value)}
+                  style={{
+                    width: "56px",
+                    padding: "8px",
+                    borderRadius: "6px",
+                    border: "1px solid #e2e8f0",
+                    fontSize: "14px",
+                    backgroundColor: "#f8fafc",
+                    outline: "none",
+                    fontFamily: "inherit",
+                    color: "inherit",
+                  }}
+                />
+                <span style={{ fontSize: "12px", color: "#64748b" }}>mins</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div className="settings-row" style={{ marginBottom: "16px" }}>
+          <div>
+            <div className="settings-label">Show Monthly Avg Target</div>
+            <div className="settings-description">
+              Show or hide the Monthly Avg Target card in Today view
+            </div>
+          </div>
+          <div className="toggle-wrapper">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                className="toggle-switch"
+                checked={showMonthlyAvgTarget}
+                onChange={(e) => void setShowMonthlyAvgTarget(e.target.checked)}
+              />
+            </label>
           </div>
         </div>
 

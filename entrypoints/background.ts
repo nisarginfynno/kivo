@@ -6,6 +6,12 @@ import { calculateMetrics, processMonthlyStats, processWeeklyStats } from "../ut
 import { getRandomMessage } from "../utils/notificationMessages";
 import { getRelevantMeme, shouldShowMeme, type MemeNotificationType } from "../utils/memes";
 import { format, startOfWeek, endOfWeek } from "date-fns";
+import {
+  WORK_HOURS_CONFIG_STORAGE_KEY,
+  getDailyTargetMinutes,
+  minutesToHourDecimal,
+  normalizeWorkHoursConfig,
+} from "../utils/workHoursConfig";
 
 // Get current date/week keys
 function getCurrentDay(): string {
@@ -56,7 +62,12 @@ async function playNotificationSound() {
 }
 
 // Optimized notification helper (supports optional meme images)
-async function showNotification(title: string, message: string, requireInteraction = false, imageUrl?: string | null) {
+async function showNotification(
+  title: string,
+  message: string,
+  requireInteraction = false,
+  imageUrl?: string | null,
+) {
   try {
     const { notifications_enabled } = await browser.storage.local.get("notifications_enabled");
     if (notifications_enabled !== true) {
@@ -67,19 +78,32 @@ async function showNotification(title: string, message: string, requireInteracti
       console.error("Notifications API not available");
       return;
     }
-
-
     // Use image-type notification when a meme URL is available
     if (imageUrl) {
-      await browser.notifications.create({
-        type: "image",
-        iconUrl: "icon/128.png",
-        title,
-        message,
-        imageUrl,
-        requireInteraction,
-        silent: true,
-      });
+      try {
+        await browser.notifications.create({
+          type: "image",
+          iconUrl: "icon/128.png",
+          title,
+          message,
+          imageUrl,
+          requireInteraction,
+          silent: true,
+        });
+      } catch (error) {
+        console.warn(
+          "Image notification not supported; falling back to basic notification.",
+          error,
+        );
+        await browser.notifications.create({
+          type: "basic",
+          iconUrl: "icon/128.png",
+          title,
+          message,
+          requireInteraction,
+          silent: true,
+        });
+      }
     } else {
       await browser.notifications.create({
         type: "basic",
@@ -87,7 +111,7 @@ async function showNotification(title: string, message: string, requireInteracti
         title,
         message,
         requireInteraction,
-        silent: true, // Suppress OS sound — we play our own
+        silent: true, // Suppress OS sound; we play our own.
       });
     }
 
@@ -217,7 +241,7 @@ async function handleTokenExpiration(accessToken: string) {
       await showNotification(
         "Session Expired ⚠️",
         getRandomMessage("sessionExpired"),
-        true // require interaction so they see it
+        true
       );
       await updateNotificationState("tokenExpiredNotifiedToday", true);
     }
@@ -231,7 +255,7 @@ async function handleTokenExpiration(accessToken: string) {
 async function runNotificationLogic() {
   try {
     const currentDay = getCurrentDay();
-    const storageKeys = ['access_token', `halfDay_${currentDay}`, 'attendance_data', 'current_total_worked_seconds', 'lunch_time', 'memes_enabled', 'holidays_cache', 'leave_cache'];
+    const storageKeys = ['access_token', `halfDay_${currentDay}`, 'attendance_data', 'current_total_worked_seconds', 'lunch_time', 'memes_enabled', 'holidays_cache', 'leave_cache', WORK_HOURS_CONFIG_STORAGE_KEY];
     const storageData = await browser.storage.local.get(storageKeys);
 
     const accessToken = storageData.access_token as string;
@@ -243,6 +267,11 @@ async function runNotificationLogic() {
     }
 
     const isHalfDay = !!storageData[`halfDay_${currentDay}`];
+    const workHoursConfig = normalizeWorkHoursConfig(
+      storageData[WORK_HOURS_CONFIG_STORAGE_KEY] as
+        | { fullDayMinutes?: number; halfDayMinutes?: number }
+        | undefined,
+    );
     const storedAttendanceData = storageData.attendance_data;
 
     // Fetch fresh data
@@ -321,21 +350,35 @@ async function runNotificationLogic() {
     }
 
     // Calculate current metrics
-    const { metrics, totalWorkedSeconds, isClockedIn, leaveTimeInfo } = calculateMetrics(attendanceData, isHalfDay);
+    const { metrics, totalWorkedSeconds, isClockedIn, leaveTimeInfo } =
+      calculateMetrics(attendanceData, isHalfDay, workHoursConfig);
     const totalWorkedMinutes = Math.floor(totalWorkedSeconds / 60);
 
     // Calculate monthly stats for "Average Target"
-    const monthlyStats = processMonthlyStats(attendanceData, holidaysData, leaveData);
+    const monthlyStats = processMonthlyStats(
+      attendanceData,
+      holidaysData,
+      leaveData,
+      new Date(),
+      workHoursConfig,
+    );
     const hoursNeededPerDay = monthlyStats.hoursNeededPerDay;
 
     // Calculate weekly stats for "Weekly Average Target"
-    const weeklyStats = processWeeklyStats(attendanceData, holidaysData, leaveData, isHalfDay, new Date());
+    const weeklyStats = processWeeklyStats(
+      attendanceData,
+      holidaysData,
+      leaveData,
+      isHalfDay,
+      new Date(),
+      workHoursConfig,
+    );
     const weeklyHoursNeededPerDay = weeklyStats.hoursNeededPerDay;
 
     // Get notification states
     const notificationStates = await getNotificationStates();
 
-    const targetMinutes = isHalfDay ? 4 * 60 + 30 : 8 * 60 + 15;
+    const targetMinutes = getDailyTargetMinutes(isHalfDay, workHoursConfig);
     const notificationsToShow: Array<{ title: string; message: string; stateKey: keyof NotificationStates; newValue: any; memeType?: MemeNotificationType }> = [];
     const nowLocal = new Date();
     const currentHour = nowLocal.getHours();
@@ -357,10 +400,12 @@ async function runNotificationLogic() {
     }
 
     // 2. Average Target Met (Monthly)
-    // Only if hoursNeededPerDay is available and LESS than the standard 8h 15m (8.25)
+    // Only if hoursNeededPerDay is below the configured full-day target
     // and user has reached that target.
     if (!notificationStates.averageTargetNotifiedToday && hoursNeededPerDay !== null) {
-      const standardTargetHours = 8.25; // 8h 15m
+      const standardTargetHours = minutesToHourDecimal(
+        workHoursConfig.fullDayMinutes,
+      );
       // If needed is less than standard, it's a "happy" early leave day potentially
       if (hoursNeededPerDay < standardTargetHours) {
         const neededMinutes = Math.ceil(hoursNeededPerDay * 60);
@@ -378,7 +423,9 @@ async function runNotificationLogic() {
 
     // 2b. Average Target Met (Weekly)
     if (!notificationStates.weeklyAverageTargetNotifiedToday && weeklyHoursNeededPerDay !== null) {
-      const standardTargetHours = 8.25;
+      const standardTargetHours = minutesToHourDecimal(
+        workHoursConfig.fullDayMinutes,
+      );
       if (weeklyHoursNeededPerDay < standardTargetHours) {
         const neededMinutes = Math.ceil(weeklyHoursNeededPerDay * 60);
         if (totalWorkedMinutes >= neededMinutes) {
@@ -563,7 +610,12 @@ async function runNotificationLogic() {
               // Silently ignore — meme is a nice-to-have
             }
           }
-          await showNotification(notification.title, notification.message, false, memeUrl);
+          await showNotification(
+            notification.title,
+            notification.message,
+            false,
+            memeUrl
+          );
         }
         await updateNotificationState(notification.stateKey, notification.newValue);
       }
@@ -645,3 +697,4 @@ export default defineBackground(() => {
 
   console.log('Background service initialized with 1-minute metric checks');
 });
+

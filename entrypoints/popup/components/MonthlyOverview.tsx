@@ -1,17 +1,20 @@
 import { useMonthlyStats } from "../hooks/useMonthlyStats";
 import { format, subMonths, startOfMonth } from "date-fns";
 import pluralize from "pluralize";
+import type { WorkHoursConfig } from "../../../utils/workHoursConfig";
 
 interface MonthlyOverviewProps {
   accessToken: string | null;
   selectedMonth: Date;
   onMonthChange: (date: Date) => void;
+  workHoursConfig: WorkHoursConfig;
 }
 
 export default function MonthlyOverview({
   accessToken,
   selectedMonth,
   onMonthChange,
+  workHoursConfig,
 }: MonthlyOverviewProps) {
   const {
     loading,
@@ -22,7 +25,7 @@ export default function MonthlyOverview({
     hoursNeededPerDay,
     holidays,
     leaveDaysCount,
-  } = useMonthlyStats(accessToken, selectedMonth);
+  } = useMonthlyStats(accessToken, selectedMonth, workHoursConfig);
 
   const holidaysCount = holidays.length;
   const months = Array.from({ length: 12 }, (_, i) => {

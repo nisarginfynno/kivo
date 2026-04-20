@@ -15,6 +15,11 @@ import type {
   TimeEntry,
 } from "../../../utils/types";
 import { useDailyStats } from "../hooks/useDailyStats";
+import {
+  formatMinutesAsHoursAndMinutes,
+  getDailyTargetMinutes,
+  type WorkHoursConfig,
+} from "../../../utils/workHoursConfig";
 
 interface TodayOverviewProps {
   accessToken: string | null;
@@ -29,6 +34,8 @@ interface TodayOverviewProps {
   totalWorkedSeconds: number;
   weeklyHoursNeededPerDay: number | null;
   monthlyHoursNeededPerDay: number | null;
+  showMonthlyAvgTarget: boolean;
+  workHoursConfig: WorkHoursConfig;
 }
 
 export default function TodayOverview({
@@ -44,6 +51,8 @@ export default function TodayOverview({
   totalWorkedSeconds: liveTotalWorkedSeconds,
   weeklyHoursNeededPerDay,
   monthlyHoursNeededPerDay,
+  showMonthlyAvgTarget,
+  workHoursConfig,
 }: TodayOverviewProps) {
   const [selectedDate, setSelectedDate] = useState(new Date());
 
@@ -108,6 +117,7 @@ export default function TodayOverview({
     accessToken,
     isHalfDay,
     selectedDate,
+    workHoursConfig,
     !isToday
   );
 
@@ -124,6 +134,9 @@ export default function TodayOverview({
   const totalWorkedSeconds = isToday
     ? liveTotalWorkedSeconds
     : pastStats.totalWorkedSeconds;
+  const dailyTargetLabel = formatMinutesAsHoursAndMinutes(
+    getDailyTargetMinutes(isHalfDay, workHoursConfig),
+  );
 
   const headerContent = (
     <div className="monthly-header" style={{ marginBottom: "16px" }}>
@@ -261,7 +274,7 @@ export default function TodayOverview({
             <div className="leave-card normal-leave">
               <div className="leave-label">Normal Leave Time</div>
               <div className="leave-sub-label">
-                ({isHalfDay ? "4h 30m" : "8h 15m"})
+                ({dailyTargetLabel})
               </div>
               <div className="leave-time">{leaveTimeInfo.normalLeaveTime}</div>
             </div>
@@ -272,7 +285,8 @@ export default function TodayOverview({
                   weeklyHoursNeededPerDay
                 )
               )}
-            {monthlyHoursNeededPerDay !== null &&
+            {showMonthlyAvgTarget &&
+              monthlyHoursNeededPerDay !== null &&
               monthlyHoursNeededPerDay > 0 && (
                 renderAverageTargetCard(
                   "Monthly Avg Target",

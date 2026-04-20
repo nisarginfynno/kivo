@@ -5,7 +5,7 @@ export const notificationMessages = {
   // ── Work Target Completed ──────────────────────────────────────────
   completion: [
     "Target smashed! 🎯 Time to celebrate!",
-    "8h 15m done! You're officially free-range now 🐔",
+    "Daily target done! You're officially free-range now 🐔",
     "Daily target completed! Mission accomplished 🏆",
     "Achievement unlocked: Full Day Warrior! 💪",
     "Work complete! Go enjoy the rest of your day 😎",
@@ -18,7 +18,7 @@ export const notificationMessages = {
 
   completionHalfDay: [
     "Half day target crushed! 🎯 Enjoy the rest of the day!",
-    "4h 30m done! Half day warrior mode complete 💪",
+    "Half day target done! Half day warrior mode complete 💪",
     "Half day? More like half day HERO! 🦸",
     "Short day, big energy. You nailed it! ⚡",
     "Half day complete! Time for bonus life content 🎮",
@@ -27,7 +27,7 @@ export const notificationMessages = {
   // ── Monthly Average Target Met ─────────────────────────────────────
   monthlyAverage: [
     "Monthly average on track! 🌟 Feel free to wrap up whenever you're ready!",
-    "Your monthly 8h 15m average is looking great! Leave guilt-free today 🥳",
+    "Your monthly target average is looking great! Leave guilt-free today 🥳",
     "Ahead of schedule! Your monthly average thanks you 📊",
     "Monthly target pace locked in. You're officially cruising 🚢",
     "Great discipline this month! Your average is on point 🎯",
@@ -37,7 +37,7 @@ export const notificationMessages = {
   // ── Weekly Average Target Met ──────────────────────────────────────
   weeklyAverage: [
     "Weekly average met! 🌟 Your pace this week is solid!",
-    "You've hit your daily target for the weekly 8h 15m average! 🥳",
+    "You've hit your daily target for the weekly average! 🥳",
     "Weekly rhythm locked in! Consistent and crushing it 💪",
     "Your weekly numbers are looking beautiful 📈",
     "Week's average? On track. You? Unstoppable. 🚀",

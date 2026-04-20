@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { browser } from "wxt/browser";
 import type { Metrics, LeaveTimeInfo, TimePair, Break, TimeEntry, AttendanceData } from "../../../utils/types";
 import { generateMetricsFromSeconds, calculateLeaveTimeInfo, calculateTimePairsAndBreaks } from "../../../utils/calculations";
+import type { WorkHoursConfig } from "../../../utils/workHoursConfig";
 
 interface UseCurrentMetricsResult {
     metrics: Metrics | null;
@@ -16,7 +17,10 @@ interface UseCurrentMetricsResult {
     refreshMetrics: () => void;
 }
 
-export const useCurrentMetrics = (isHalfDay: boolean): UseCurrentMetricsResult => {
+export const useCurrentMetrics = (
+    isHalfDay: boolean,
+    workHoursConfig: WorkHoursConfig,
+): UseCurrentMetricsResult => {
     // Stored values (source of truth from background)
     const [storedMetrics, setStoredMetrics] = useState<Metrics | null>(null);
     const [storedAttendanceData, setStoredAttendanceData] = useState<AttendanceData[]>([]);
@@ -99,8 +103,17 @@ export const useCurrentMetrics = (isHalfDay: boolean): UseCurrentMetricsResult =
 
             const currentSeconds = storedTotalSeconds + additionalSeconds;
 
-            const newMetrics = generateMetricsFromSeconds(currentSeconds, isHalfDay, isClockedIn);
-            const newLeaveInfo = calculateLeaveTimeInfo(currentSeconds, isHalfDay);
+            const newMetrics = generateMetricsFromSeconds(
+                currentSeconds,
+                isHalfDay,
+                isClockedIn,
+                workHoursConfig,
+            );
+            const newLeaveInfo = calculateLeaveTimeInfo(
+                currentSeconds,
+                isHalfDay,
+                workHoursConfig,
+            );
 
             setLiveMetrics(newMetrics);
             setLiveTotalSeconds(currentSeconds);
@@ -119,7 +132,7 @@ export const useCurrentMetrics = (isHalfDay: boolean): UseCurrentMetricsResult =
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
         };
-    }, [storedMetrics, storedTotalSeconds, isClockedIn, lastUpdated, isHalfDay]);
+    }, [storedMetrics, storedTotalSeconds, isClockedIn, lastUpdated, isHalfDay, workHoursConfig]);
 
     // Calculate pairs and breaks from stored attendance data
     const { timePairs, breaks, unpairedInEntry } = calculateTimePairsAndBreaks(storedAttendanceData);

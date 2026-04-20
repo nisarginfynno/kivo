@@ -24,6 +24,14 @@ import type {
   MonthlyStats,
   WeeklyStats,
 } from "./types";
+import {
+  DEFAULT_WORK_HOURS_CONFIG,
+  STATUS_GREEN_WINDOW_MINUTES,
+  getDailyTargetSeconds,
+  getEarlyLeaveTargetSeconds,
+  minutesToHourDecimal,
+  type WorkHoursConfig,
+} from "./workHoursConfig";
 
 // Helper to calculate total seconds from attendance data
 export const calculateSecondsFromAttendance = (
@@ -188,9 +196,10 @@ export const generateMetricsFromSeconds = (
   totalWorkedSeconds: number,
   isHalfDay: boolean,
   isClockedIn: boolean = false,
+  workHoursConfig: WorkHoursConfig = DEFAULT_WORK_HOURS_CONFIG,
 ): Metrics => {
   // Determine target
-  const targetSeconds = isHalfDay ? (4 * 60 + 30) * 60 : (8 * 60 + 15) * 60;
+  const targetSeconds = getDailyTargetSeconds(isHalfDay, workHoursConfig);
   const remainingSeconds = Math.max(0, targetSeconds - totalWorkedSeconds);
   const isOvertime = totalWorkedSeconds > targetSeconds;
   const overtimeSeconds = isOvertime ? totalWorkedSeconds - targetSeconds : 0;
@@ -202,24 +211,14 @@ export const generateMetricsFromSeconds = (
 
   // Determine status color
   let totalWorkedStatus: "yellow" | "green" | "red";
-  if (isHalfDay) {
-    const halfDayMax = (4 * 60 + 45) * 60;
-    if (totalWorkedSeconds < targetSeconds) {
-      totalWorkedStatus = "yellow";
-    } else if (totalWorkedSeconds <= halfDayMax) {
-      totalWorkedStatus = "green";
-    } else {
-      totalWorkedStatus = "red";
-    }
+  const maxAcceptableSeconds =
+    targetSeconds + STATUS_GREEN_WINDOW_MINUTES * 60;
+  if (totalWorkedSeconds < targetSeconds) {
+    totalWorkedStatus = "yellow";
+  } else if (totalWorkedSeconds <= maxAcceptableSeconds) {
+    totalWorkedStatus = "green";
   } else {
-    const maxAcceptable = (8 * 60 + 30) * 60;
-    if (totalWorkedSeconds < targetSeconds) {
-      totalWorkedStatus = "yellow";
-    } else if (totalWorkedSeconds <= maxAcceptable) {
-      totalWorkedStatus = "green";
-    } else {
-      totalWorkedStatus = "red";
-    }
+    totalWorkedStatus = "red";
   }
 
   // Format total worked
@@ -267,9 +266,10 @@ export const generateMetricsFromSeconds = (
 export const calculateLeaveTimeInfo = (
   totalWorkedSeconds: number,
   halfDay: boolean,
+  workHoursConfig: WorkHoursConfig = DEFAULT_WORK_HOURS_CONFIG,
 ): LeaveTimeInfo => {
   const now = new Date();
-  const normalTargetSeconds = halfDay ? (4 * 60 + 30) * 60 : (8 * 60 + 15) * 60;
+  const normalTargetSeconds = getDailyTargetSeconds(halfDay, workHoursConfig);
 
   let normalLeaveTimeStr: string;
   if (totalWorkedSeconds >= normalTargetSeconds) {
@@ -285,7 +285,10 @@ export const calculateLeaveTimeInfo = (
     normalLeaveTimeStr = `${normalLeaveTime.getHours() > 12 ? normalLeaveTime.getHours() - 12 : normalLeaveTime.getHours()}:${normalLeaveTime.getMinutes().toString().padStart(2, "0")} ${normalLeaveTime.getHours() >= 12 ? "pm" : "am"}`;
   }
 
-  const earlyTargetSeconds = halfDay ? (3 * 60 + 30) * 60 : (7 * 60) * 60;
+  const earlyTargetSeconds = getEarlyLeaveTargetSeconds(
+    halfDay,
+    workHoursConfig,
+  );
 
   let earlyLeaveTimeStr: string;
   if (totalWorkedSeconds >= earlyTargetSeconds) {
@@ -307,6 +310,7 @@ export const calculateLeaveTimeInfo = (
 export const calculateMetrics = (
   attendanceData: AttendanceData[],
   halfDay: boolean,
+  workHoursConfig: WorkHoursConfig = DEFAULT_WORK_HOURS_CONFIG,
 ): {
   metrics: Metrics;
   totalWorkedSeconds: number;
@@ -319,7 +323,7 @@ export const calculateMetrics = (
   if (!attendanceData.length) {
     // Default empty
     return {
-      metrics: generateMetricsFromSeconds(0, halfDay, false),
+      metrics: generateMetricsFromSeconds(0, halfDay, false, workHoursConfig),
       totalWorkedSeconds: 0,
       isClockedIn: false,
       leaveTimeInfo: null,
@@ -330,8 +334,13 @@ export const calculateMetrics = (
     totalWorkedSeconds,
     halfDay,
     isClockedIn,
+    workHoursConfig,
   );
-  const leaveTimeInfo = calculateLeaveTimeInfo(totalWorkedSeconds, halfDay);
+  const leaveTimeInfo = calculateLeaveTimeInfo(
+    totalWorkedSeconds,
+    halfDay,
+    workHoursConfig,
+  );
 
   return {
     metrics,
@@ -346,6 +355,7 @@ export const processMonthlyStats = (
   holidaysData: HolidayResponse | null,
   leaveData: LeaveResponse | null,
   selectedDate: Date = new Date(),
+  workHoursConfig: WorkHoursConfig = DEFAULT_WORK_HOURS_CONFIG,
 ): MonthlyStats => {
   const now = selectedDate;
   const monthStart = startOfMonth(now);
@@ -480,7 +490,9 @@ export const processMonthlyStats = (
 
   // Calculate Needed/Day independently of past attendance check
   if (remainingWorkingDaysCount > 0 && totalWorkingDaysCount > 0) {
-    const TARGET_AVERAGE_HOURS = 8.25;
+    const TARGET_AVERAGE_HOURS = minutesToHourDecimal(
+      workHoursConfig.fullDayMinutes,
+    );
     const totalHoursNeeded = totalWorkingDaysCount * TARGET_AVERAGE_HOURS;
     const hoursWorkedSoFar = averageHours * currentWorkingDayCount;
 
@@ -509,6 +521,7 @@ export const processWeeklyStats = (
   leaveData: LeaveResponse | null,
   isManualHalfDay: boolean,
   selectedDate: Date = new Date(),
+  workHoursConfig: WorkHoursConfig = DEFAULT_WORK_HOURS_CONFIG,
 ): WeeklyStats => {
   const now = selectedDate;
   // Use ISO week (Monday start)
@@ -558,6 +571,8 @@ export const processWeeklyStats = (
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const allDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
+  const fullDayHours = minutesToHourDecimal(workHoursConfig.fullDayMinutes);
+  const halfDayHours = minutesToHourDecimal(workHoursConfig.halfDayMinutes);
 
   let totalWorkingDaysCount = 0;
   let currentWorkingDayCount = 0;
@@ -570,20 +585,19 @@ export const processWeeklyStats = (
     // Skip weekends
     if (dayOfWeek === 0 || dayOfWeek === 6) return;
 
-    let dayTarget = 8.25; // 8h 15m default
+    let dayTarget = fullDayHours;
 
     if (holidayDates.includes(dayStr)) {
       dayTarget = 0;
     } else {
       // Deduct leave
       const leaveDuration = leaveDurations.get(dayStr) || 0;
-      dayTarget -= leaveDuration * 8.25;
+      dayTarget -= leaveDuration * fullDayHours;
 
       // Manual Half Day check (Today Only)
       if (isManualHalfDay && isSameDay(day, now)) {
-        // If manual half day, target is 4.5h max
-        if (dayTarget > 4.5) {
-          dayTarget = 4.5;
+        if (dayTarget > halfDayHours) {
+          dayTarget = halfDayHours;
         }
       }
     }

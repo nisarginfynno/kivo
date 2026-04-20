@@ -8,11 +8,16 @@ import {
 } from "../../../utils/api";
 import { processWeeklyStats } from "../../../utils/calculations";
 import type { WeeklyStats } from "../../../utils/types";
+import {
+  minutesToHourDecimal,
+  type WorkHoursConfig,
+} from "../../../utils/workHoursConfig";
 
 export const useWeeklyStats = (
   accessToken: string | null,
   isManualHalfDay: boolean,
-  selectedDate: Date
+  selectedDate: Date,
+  workHoursConfig: WorkHoursConfig,
 ) => {
   const [stats, setStats] = useState<WeeklyStats>({
     holidays: [],
@@ -64,7 +69,8 @@ export const useWeeklyStats = (
           holidaysData,
           leaveData,
           isManualHalfDay,
-          selectedDate
+          selectedDate,
+          workHoursConfig,
         );
 
         let finalStats = { ...processed };
@@ -83,10 +89,9 @@ export const useWeeklyStats = (
               // Update Total Worked
               finalStats.totalWorked = totalEffectiveHours;
 
-              // Determine Weekly Target based on Working Days (assuming 8.25h/day standard)
-              // Or roughly estimate?
-              // If we have workingDays (e.g. 5), then target = 5 * 8.25 = 41.25.
-              finalStats.weeklyTarget = workingDays * 8.25;
+              // Determine weekly target based on configured full-day target.
+              finalStats.weeklyTarget =
+                workingDays * minutesToHourDecimal(workHoursConfig.fullDayMinutes);
 
               // Remaining calculation - only 0 if target met
               finalStats.remaining = Math.max(0, finalStats.weeklyTarget - finalStats.totalWorked);
@@ -128,7 +133,7 @@ export const useWeeklyStats = (
     };
 
     loadStats();
-  }, [accessToken, isManualHalfDay, selectedDate]);
+  }, [accessToken, isManualHalfDay, selectedDate, workHoursConfig]);
 
   return { ...stats, loading, error };
 };

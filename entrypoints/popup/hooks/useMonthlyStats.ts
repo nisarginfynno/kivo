@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { format, isSameMonth, startOfMonth, endOfMonth } from "date-fns";
 import { fetchAttendanceSummary, fetchHolidays, fetchLeaveSummary, fetchRangeStats } from "../../../utils/api";
 import { processMonthlyStats } from "../../../utils/calculations";
+import type { WorkHoursConfig } from "../../../utils/workHoursConfig";
 
 interface MonthlyStats {
     holidays: string[];
@@ -14,7 +15,11 @@ interface MonthlyStats {
     loading: boolean;
 }
 
-export const useMonthlyStats = (accessToken: string | null, selectedDate: Date) => {
+export const useMonthlyStats = (
+    accessToken: string | null,
+    selectedDate: Date,
+    workHoursConfig: WorkHoursConfig,
+) => {
     const [stats, setStats] = useState<MonthlyStats>({
         holidays: [],
         leaveDaysCount: 0,
@@ -52,7 +57,13 @@ export const useMonthlyStats = (accessToken: string | null, selectedDate: Date) 
                 if (!attendanceData) throw new Error("Failed to fetch attendance");
 
                 // Basic processing using existing logic
-                const processed = processMonthlyStats(attendanceData, holidaysData, leaveData, selectedDate);
+                const processed = processMonthlyStats(
+                    attendanceData,
+                    holidaysData,
+                    leaveData,
+                    selectedDate,
+                    workHoursConfig,
+                );
 
                 let finalStats: MonthlyStats = {
                     holidays: processed.holidayDates,
@@ -111,7 +122,7 @@ export const useMonthlyStats = (accessToken: string | null, selectedDate: Date) 
         };
 
         loadStats();
-    }, [accessToken, selectedDate]);
+    }, [accessToken, selectedDate, workHoursConfig]);
 
     return stats;
 };
