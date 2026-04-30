@@ -82,6 +82,7 @@ export default function WeeklyOverview({
           <button
             className="icon-button"
             onClick={handlePrevWeek}
+            aria-label="Show previous week"
             style={{
               border: "none",
               background: "transparent",
@@ -91,7 +92,6 @@ export default function WeeklyOverview({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              outline: "none",
             }}
           >
             <ChevronLeft />
@@ -103,6 +103,7 @@ export default function WeeklyOverview({
             className="icon-button"
             onClick={handleNextWeek}
             disabled={isCurrentWeek}
+            aria-label="Show next week"
             style={{
               border: "none",
               background: "transparent",
@@ -112,7 +113,6 @@ export default function WeeklyOverview({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              outline: "none",
             }}
           >
             <ChevronRight />

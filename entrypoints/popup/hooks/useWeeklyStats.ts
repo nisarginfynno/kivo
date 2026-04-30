@@ -25,6 +25,7 @@ export const useWeeklyStats = (
     totalWorkingDays: null,
     currentWorkingDay: null,
     remainingWorkingDays: null,
+    futureWorkingDays: null,
     averageHours: null,
     hoursNeededPerDay: null,
     weeklyTarget: 0,
@@ -112,6 +113,7 @@ export const useWeeklyStats = (
               finalStats.totalWorkingDays = workingDays;
               finalStats.currentWorkingDay = workingDays;
               finalStats.remainingWorkingDays = 0;
+              finalStats.futureWorkingDays = 0;
               finalStats.hoursNeededPerDay = null;
             }
 

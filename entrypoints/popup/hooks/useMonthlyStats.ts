@@ -10,8 +10,12 @@ interface MonthlyStats {
     totalWorkingDays: number | null;
     currentWorkingDay: number | null;
     remainingWorkingDays: number | null;
+    futureWorkingDays: number | null;
     averageHours: number | null;
     hoursNeededPerDay: number | null;
+    monthlyTarget: number;
+    totalWorked: number;
+    remaining: number;
     loading: boolean;
 }
 
@@ -26,8 +30,12 @@ export const useMonthlyStats = (
         totalWorkingDays: null,
         currentWorkingDay: null,
         remainingWorkingDays: null,
+        futureWorkingDays: null,
         averageHours: null,
         hoursNeededPerDay: null,
+        monthlyTarget: 0,
+        totalWorked: 0,
+        remaining: 0,
         loading: false,
     });
 
@@ -71,8 +79,12 @@ export const useMonthlyStats = (
                     totalWorkingDays: processed.totalWorkingDaysCount,
                     currentWorkingDay: processed.currentWorkingDayCount,
                     remainingWorkingDays: processed.remainingWorkingDaysCount,
+                    futureWorkingDays: processed.futureWorkingDaysCount,
                     averageHours: processed.averageHours,
                     hoursNeededPerDay: processed.hoursNeededPerDay,
+                    monthlyTarget: processed.monthlyTarget,
+                    totalWorked: processed.totalWorked,
+                    remaining: processed.remaining,
                     loading: false,
                 };
 
@@ -85,7 +97,11 @@ export const useMonthlyStats = (
                         const rangeStats = await fetchRangeStats(accessToken, fromDate, toDate);
 
                         if (rangeStats?.data?.myStats) {
-                            const { averageHoursPerDayInHHMM, workingDays } = rangeStats.data.myStats;
+                            const {
+                                averageHoursPerDayInHHMM,
+                                totalEffectiveHours,
+                                workingDays,
+                            } = rangeStats.data.myStats;
 
                             let avgHoursDec = 0;
                             if (averageHoursPerDayInHHMM) {
@@ -101,7 +117,15 @@ export const useMonthlyStats = (
                             finalStats.averageHours = avgHoursDec;
                             finalStats.currentWorkingDay = workingDays;
                             finalStats.remainingWorkingDays = 0;
+                            finalStats.futureWorkingDays = 0;
                             finalStats.hoursNeededPerDay = null;
+                            finalStats.totalWorked = totalEffectiveHours;
+                            finalStats.monthlyTarget =
+                                workingDays * (workHoursConfig.fullDayMinutes / 60);
+                            finalStats.remaining = Math.max(
+                                0,
+                                finalStats.monthlyTarget - finalStats.totalWorked,
+                            );
                         }
                     } catch (e) {
                         console.error("Failed to fetch range stats for past month", e);

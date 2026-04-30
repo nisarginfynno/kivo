@@ -21,7 +21,9 @@ import type {
   Break,
   HolidayResponse,
   LeaveResponse,
+  LeaveNowProjection,
   MonthlyStats,
+  PeriodProjection,
   WeeklyStats,
 } from "./types";
 import {
@@ -405,6 +407,7 @@ export const processMonthlyStats = (
 
   let totalWorkingDaysCount = 0;
   let currentWorkingDayCount = 0;
+  let futureWorkingDaysCount = 0;
 
   allDays.forEach((day) => {
     const dayOfWeek = getDay(day);
@@ -429,6 +432,8 @@ export const processMonthlyStats = (
     dayDate.setHours(0, 0, 0, 0);
     if (dayDate < today) {
       currentWorkingDayCount += workingValue;
+    } else if (dayDate > today) {
+      futureWorkingDaysCount += workingValue;
     }
   });
 
@@ -438,12 +443,10 @@ export const processMonthlyStats = (
   // Process Average Hours
   let averageHours = 0;
   let hoursNeededPerDay = 0;
+  let totalWorkedHours = 0;
+  let pastWorkedHours = 0;
 
-  if (
-    attendanceData &&
-    attendanceData.length > 0 &&
-    currentWorkingDayCount > 0
-  ) {
+  if (attendanceData && attendanceData.length > 0) {
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
 
@@ -453,48 +456,47 @@ export const processMonthlyStats = (
       entryDate.setHours(0, 0, 0, 0);
       return (
         entryDate.getMonth() === currentMonth &&
-        entryDate.getFullYear() === currentYear &&
-        entryDate < today
+        entryDate.getFullYear() === currentYear
       );
     });
 
-    let totalHours = 0;
     monthlyAttendance.forEach((entry) => {
-      if (
+      if (!entry.attendanceDate) return;
+      const entryDate = new Date(entry.attendanceDate);
+      entryDate.setHours(0, 0, 0, 0);
+
+      let entryHours = 0;
+      if (isSameDay(entryDate, today)) {
+        const { totalWorkedSeconds } = calculateSecondsFromAttendance([entry]);
+        entryHours = totalWorkedSeconds / 3600;
+      } else if (
         entry.totalEffectiveHours !== undefined &&
         entry.totalEffectiveHours !== null
       ) {
-        totalHours += entry.totalEffectiveHours;
+        entryHours = entry.totalEffectiveHours;
+      }
+
+      totalWorkedHours += entryHours;
+      if (entryDate < today) {
+        pastWorkedHours += entryHours;
       }
     });
 
-    const daysToDivideBy = currentWorkingDayCount;
-    averageHours = daysToDivideBy > 0 ? totalHours / daysToDivideBy : 0;
-
-    // If it's the first working day (daysToDivideBy === 0), show today's hours as average
-    if (daysToDivideBy === 0) {
-      const todayEntry = attendanceData.find((entry) => {
-        if (!entry.attendanceDate) return false;
-        const entryDate = new Date(entry.attendanceDate);
-        return isSameDay(entryDate, now);
-      });
-
-      if (todayEntry) {
-        const { totalWorkedSeconds } = calculateSecondsFromAttendance([todayEntry]);
-        if (totalWorkedSeconds > 0) {
-          averageHours = totalWorkedSeconds / 3600;
-        }
-      }
+    if (currentWorkingDayCount > 0) {
+      averageHours = pastWorkedHours / currentWorkingDayCount;
+    } else if (totalWorkedHours > 0) {
+      averageHours = totalWorkedHours;
     }
   }
 
   // Calculate Needed/Day independently of past attendance check
+  const TARGET_AVERAGE_HOURS = minutesToHourDecimal(
+    workHoursConfig.fullDayMinutes,
+  );
+  const totalHoursNeeded = totalWorkingDaysCount * TARGET_AVERAGE_HOURS;
+
   if (remainingWorkingDaysCount > 0 && totalWorkingDaysCount > 0) {
-    const TARGET_AVERAGE_HOURS = minutesToHourDecimal(
-      workHoursConfig.fullDayMinutes,
-    );
-    const totalHoursNeeded = totalWorkingDaysCount * TARGET_AVERAGE_HOURS;
-    const hoursWorkedSoFar = averageHours * currentWorkingDayCount;
+    const hoursWorkedSoFar = pastWorkedHours;
 
     // Ensure we don't have negative remaining due to floating point or over-work
     const hoursRemaining = Math.max(0, totalHoursNeeded - hoursWorkedSoFar);
@@ -510,8 +512,12 @@ export const processMonthlyStats = (
     totalWorkingDaysCount,
     currentWorkingDayCount,
     remainingWorkingDaysCount,
+    futureWorkingDaysCount,
     averageHours: averageHours || null,
     hoursNeededPerDay: hoursNeededPerDay > 0 ? hoursNeededPerDay : null,
+    monthlyTarget: totalHoursNeeded,
+    totalWorked: totalWorkedHours,
+    remaining: Math.max(0, totalHoursNeeded - totalWorkedHours),
   };
 };
 
@@ -576,6 +582,7 @@ export const processWeeklyStats = (
 
   let totalWorkingDaysCount = 0;
   let currentWorkingDayCount = 0;
+  let futureWorkingDaysCount = 0;
   let weeklyTargetHours = 0;
 
   allDays.forEach((day) => {
@@ -614,6 +621,8 @@ export const processWeeklyStats = (
     dayDate.setHours(0, 0, 0, 0);
     if (dayDate < today) {
       currentWorkingDayCount += workingValue;
+    } else if (dayDate > today) {
+      futureWorkingDaysCount += workingValue;
     }
   });
 
@@ -696,10 +705,186 @@ export const processWeeklyStats = (
     totalWorkingDays: totalWorkingDaysCount,
     currentWorkingDay: currentWorkingDayCount,
     remainingWorkingDays: remainingWorkingDaysCount,
+    futureWorkingDays: futureWorkingDaysCount,
     averageHours: averageHours || null,
     hoursNeededPerDay: hoursNeededPerDay || null,
     weeklyTarget: weeklyTargetHours,
     totalWorked: totalWorkedHours,
     remaining: remainingHours,
+  };
+};
+
+export const calculateLeaveNowProjection = ({
+  totalWorkedSeconds,
+  isHalfDay,
+  weeklyStats,
+  monthlyStats,
+  workHoursConfig = DEFAULT_WORK_HOURS_CONFIG,
+}: {
+  totalWorkedSeconds: number;
+  isHalfDay: boolean;
+  weeklyStats?: WeeklyStats | null;
+  monthlyStats?: {
+    monthlyTarget: number;
+    totalWorked: number;
+    totalWorkingDays?: number | null;
+    totalWorkingDaysCount?: number | null;
+    futureWorkingDays?: number | null;
+    futureWorkingDaysCount?: number | null;
+  } | null;
+  workHoursConfig?: WorkHoursConfig;
+}): LeaveNowProjection => {
+  const todayWorkedHours = totalWorkedSeconds / 3600;
+  const dailyTargetHours =
+    getDailyTargetSeconds(isHalfDay, workHoursConfig) / 3600;
+  const todayShortfallHours = Math.max(0, dailyTargetHours - todayWorkedHours);
+
+  const buildPeriodProjection = (
+    targetHours: number,
+    workedHours: number,
+    totalWorkingDays: number | null | undefined,
+    futureWorkingDays: number | null | undefined,
+  ): PeriodProjection | null => {
+    if (
+      totalWorkingDays === null ||
+      totalWorkingDays === undefined ||
+      futureWorkingDays === null ||
+      futureWorkingDays === undefined
+    ) {
+      return null;
+    }
+
+    const safeTotalWorkingDays = Math.max(0, totalWorkingDays);
+    const safeFutureWorkingDays = Math.max(0, futureWorkingDays);
+    const workedDaysThroughToday = Math.max(
+      0,
+      safeTotalWorkingDays - safeFutureWorkingDays,
+    );
+    const remainingHours = Math.max(0, targetHours - workedHours);
+
+    let neededPerFutureDay: number | null = null;
+    if (safeFutureWorkingDays > 0) {
+      neededPerFutureDay = remainingHours / safeFutureWorkingDays;
+    } else if (remainingHours === 0) {
+      neededPerFutureDay = 0;
+    }
+
+    return {
+      averageIfLeaveNow:
+        workedDaysThroughToday > 0
+          ? workedHours / workedDaysThroughToday
+          : null,
+      remainingHours,
+      neededPerFutureDay,
+      futureWorkingDays: safeFutureWorkingDays,
+    };
+  };
+
+  const weekly = weeklyStats
+    ? buildPeriodProjection(
+        weeklyStats.weeklyTarget,
+        weeklyStats.totalWorked,
+        weeklyStats.totalWorkingDays,
+        weeklyStats.futureWorkingDays,
+      )
+    : null;
+
+  const monthly = monthlyStats
+    ? buildPeriodProjection(
+        monthlyStats.monthlyTarget,
+        monthlyStats.totalWorked,
+        monthlyStats.totalWorkingDaysCount ?? monthlyStats.totalWorkingDays,
+        monthlyStats.futureWorkingDaysCount ?? monthlyStats.futureWorkingDays,
+      )
+    : null;
+
+  const candidates: Array<{
+    source: "weekly" | "monthly" | "daily";
+    hours: number;
+  }> = [{ source: "daily", hours: dailyTargetHours }];
+
+  if (
+    weekly?.neededPerFutureDay !== null &&
+    weekly?.neededPerFutureDay !== undefined &&
+    weekly.futureWorkingDays > 0
+  ) {
+    candidates.push({ source: "weekly", hours: weekly.neededPerFutureDay });
+  }
+
+  if (
+    monthly?.neededPerFutureDay !== null &&
+    monthly?.neededPerFutureDay !== undefined &&
+    monthly.futureWorkingDays > 0
+  ) {
+    candidates.push({ source: "monthly", hours: monthly.neededPerFutureDay });
+  }
+
+  const highestCandidate = candidates.reduce((highest, candidate) =>
+    candidate.hours > highest.hours ? candidate : highest,
+  );
+
+  const blockedPeriods = [
+    weekly && weekly.remainingHours > 0 && weekly.futureWorkingDays === 0
+      ? "weekly"
+      : null,
+    monthly && monthly.remainingHours > 0 && monthly.futureWorkingDays === 0
+      ? "monthly"
+      : null,
+  ].filter(Boolean);
+
+  const hasBlockedPeriod = blockedPeriods.length > 0;
+  const hasOnlyBlockedPeriods = [weekly, monthly].some(Boolean) && [weekly, monthly]
+    .filter(Boolean)
+    .every(
+      (period) =>
+        period &&
+        period.remainingHours > 0 &&
+        period.futureWorkingDays === 0,
+    );
+
+  const hasAnyUnavailablePeriod = [weekly, monthly].some(
+    (period) =>
+      period &&
+      period.remainingHours > 0 &&
+      period.futureWorkingDays === 0,
+  );
+
+  const fullDayHours = minutesToHourDecimal(workHoursConfig.fullDayMinutes);
+  const recommendedTomorrowTarget = hasOnlyBlockedPeriods
+    ? null
+    : highestCandidate.hours;
+
+  let status: LeaveNowProjection["status"] = "safe";
+  let statusLabel = "Safe";
+
+  if (hasOnlyBlockedPeriods) {
+    status = "blocked";
+    statusLabel = "No recovery days left";
+  } else if (
+    recommendedTomorrowTarget !== null &&
+    recommendedTomorrowTarget > fullDayHours + 1.5
+  ) {
+    status = "heavy";
+    statusLabel = "Heavy recovery";
+  } else if (
+    recommendedTomorrowTarget !== null &&
+    recommendedTomorrowTarget > fullDayHours
+  ) {
+    status = "recoverable";
+    statusLabel = "Recoverable";
+  } else if (hasBlockedPeriod || hasAnyUnavailablePeriod) {
+    status = "recoverable";
+    statusLabel =
+      blockedPeriods.includes("monthly") ? "Month closes today" : "Week closes today";
+  }
+
+  return {
+    todayShortfallHours,
+    weekly,
+    monthly,
+    recommendedTomorrowTarget,
+    recommendationSource: hasOnlyBlockedPeriods ? null : highestCandidate.source,
+    status,
+    statusLabel,
   };
 };

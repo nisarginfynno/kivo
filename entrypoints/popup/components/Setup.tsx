@@ -6,16 +6,40 @@ interface SetupProps {
   onComplete: () => void;
 }
 
+const normalizeWorkspaceInput = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/.*$/, "")
+    .replace(/\.keka\.com$/, "");
+
+const isValidWorkspaceSubdomain = (value: string) =>
+  /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(value);
+
 export default function Setup({ onComplete }: SetupProps) {
   const [subdomain, setSubdomain] = useState("");
   const [enableNotifications, setEnableNotifications] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [setupError, setSetupError] = useState("");
+
+  const isDomainValid = isValidWorkspaceSubdomain(subdomain);
 
   const handleSave = async () => {
-    if (!subdomain) return;
+    const normalizedSubdomain = normalizeWorkspaceInput(subdomain);
+    if (!normalizedSubdomain) {
+      setSetupError("Enter your Keka workspace name.");
+      return;
+    }
+    if (!isValidWorkspaceSubdomain(normalizedSubdomain)) {
+      setSetupError("Use only letters, numbers, and hyphens.");
+      return;
+    }
+
     setLoading(true);
 
-    const fullDomain = `${subdomain}.keka.com`;
+    const fullDomain = `${normalizedSubdomain}.keka.com`;
 
     try {
       await browser.storage.local.set({
@@ -72,13 +96,14 @@ export default function Setup({ onComplete }: SetupProps) {
       onComplete();
     } catch (error) {
       console.error("Failed to save domain", error);
+      setSetupError("Could not save your workspace. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && subdomain) {
+    if (e.key === "Enter" && subdomain && isDomainValid) {
       handleSave();
     }
   };
@@ -93,21 +118,37 @@ export default function Setup({ onComplete }: SetupProps) {
 
       <div className="setup-card">
         <div className="setup-input-group">
-          <label className="setup-label">Workspace URL</label>
+          <label className="setup-label" htmlFor="workspace-url">
+            Workspace URL
+          </label>
           <div className="setup-input-wrapper">
             <input
+              id="workspace-url"
               type="text"
               className="setup-input"
               value={subdomain}
-              onChange={(e) =>
-                setSubdomain(e.target.value.trim().toLowerCase())
-              }
+              onChange={(e) => {
+                const nextValue = normalizeWorkspaceInput(e.target.value);
+                setSubdomain(nextValue);
+                setSetupError(
+                  nextValue && !isValidWorkspaceSubdomain(nextValue)
+                    ? "Use only letters, numbers, and hyphens."
+                    : "",
+                );
+              }}
               onKeyDown={handleKeyDown}
               placeholder="company"
+              aria-invalid={!!setupError}
+              aria-describedby={setupError ? "workspace-error" : undefined}
               autoFocus
             />
             <span className="setup-input-suffix">.keka.com</span>
           </div>
+          {setupError && (
+            <div className="setup-error" id="workspace-error">
+              {setupError}
+            </div>
+          )}
         </div>
 
         <div className="setup-checkbox-wrapper">
@@ -129,7 +170,7 @@ export default function Setup({ onComplete }: SetupProps) {
         <button
           className="setup-button"
           onClick={handleSave}
-          disabled={!subdomain || loading}
+          disabled={!subdomain || !isDomainValid || loading}
         >
           {loading ? "Setting up..." : "Get Started →"}
         </button>

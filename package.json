@@ -2,7 +2,7 @@
   "name": "kivo-time",
   "description": "A simple browser extension to track your work hours and breaks, Along with some useful features!",
   "private": true,
-  "version": "1.9.0",
+  "version": "1.9.5",
   "type": "module",
   "scripts": {
     "dev": "wxt",

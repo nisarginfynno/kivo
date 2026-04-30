@@ -13,6 +13,9 @@ interface SettingsProps {
   setIsHalfDay: (value: boolean) => void;
   showMonthlyAvgTarget: boolean;
   setShowMonthlyAvgTarget: (value: boolean) => void | Promise<void>;
+  showLeaveNowProjection: boolean;
+  setShowLeaveNowProjection: (value: boolean) => void | Promise<void>;
+  onReturnToToday: () => void;
 }
 
 export default function Settings({
@@ -20,12 +23,16 @@ export default function Settings({
   setIsHalfDay,
   showMonthlyAvgTarget,
   setShowMonthlyAvgTarget,
+  showLeaveNowProjection,
+  setShowLeaveNowProjection,
+  onReturnToToday,
 }: SettingsProps) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [memesEnabled, setMemesEnabled] = useState(false);
   const [domain, setDomain] = useState("");
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<string>("");
+  const [testStatus, setTestStatus] = useState<string>("");
   const [fontPreference, setFontPreference] = useState<"sans" | "mono">("sans");
   const [lunchTime, setLunchTime] = useState("12:30");
   const [fullDayTargetMinutes, setFullDayTargetMinutes] = useState(
@@ -150,10 +157,16 @@ export default function Settings({
 
   const handleFullDayHoursChange = (nextHoursInput: string) => {
     const currentHours = Math.floor(fullDayTargetMinutes / 60);
-    const nextHours = Math.min(23, Math.max(0, parseNumberInput(nextHoursInput, currentHours)));
+    const nextHours = Math.min(
+      23,
+      Math.max(0, parseNumberInput(nextHoursInput, currentHours)),
+    );
     const minutePart = fullDayTargetMinutes % 60;
     const nextFullDayMinutes = clampTargetMinutes(nextHours * 60 + minutePart);
-    const nextHalfDayMinutes = Math.min(halfDayTargetMinutes, nextFullDayMinutes);
+    const nextHalfDayMinutes = Math.min(
+      halfDayTargetMinutes,
+      nextFullDayMinutes,
+    );
 
     setFullDayTargetMinutes(nextFullDayMinutes);
     setHalfDayTargetMinutes(nextHalfDayMinutes);
@@ -168,7 +181,10 @@ export default function Settings({
     );
     const hourPart = Math.floor(fullDayTargetMinutes / 60);
     const nextFullDayMinutes = clampTargetMinutes(hourPart * 60 + nextMinutes);
-    const nextHalfDayMinutes = Math.min(halfDayTargetMinutes, nextFullDayMinutes);
+    const nextHalfDayMinutes = Math.min(
+      halfDayTargetMinutes,
+      nextFullDayMinutes,
+    );
 
     setFullDayTargetMinutes(nextFullDayMinutes);
     setHalfDayTargetMinutes(nextHalfDayMinutes);
@@ -183,7 +199,10 @@ export default function Settings({
     );
     const minutePart = halfDayTargetMinutes % 60;
     const nextHalfDayMinutes = clampTargetMinutes(nextHours * 60 + minutePart);
-    const safeHalfDayMinutes = Math.min(nextHalfDayMinutes, fullDayTargetMinutes);
+    const safeHalfDayMinutes = Math.min(
+      nextHalfDayMinutes,
+      fullDayTargetMinutes,
+    );
 
     setHalfDayTargetMinutes(safeHalfDayMinutes);
     queueWorkHoursSave(fullDayTargetMinutes, safeHalfDayMinutes);
@@ -197,7 +216,10 @@ export default function Settings({
     );
     const hourPart = Math.floor(halfDayTargetMinutes / 60);
     const nextHalfDayMinutes = clampTargetMinutes(hourPart * 60 + nextMinutes);
-    const safeHalfDayMinutes = Math.min(nextHalfDayMinutes, fullDayTargetMinutes);
+    const safeHalfDayMinutes = Math.min(
+      nextHalfDayMinutes,
+      fullDayTargetMinutes,
+    );
 
     setHalfDayTargetMinutes(safeHalfDayMinutes);
     queueWorkHoursSave(fullDayTargetMinutes, safeHalfDayMinutes);
@@ -243,6 +265,11 @@ export default function Settings({
     }
   };
 
+  const handleLeaveNowProjectionChange = async (value: boolean) => {
+    await setShowLeaveNowProjection(value);
+    onReturnToToday();
+  };
+
   if (loading) {
     return <div className="loading">Loading settings...</div>;
   }
@@ -250,6 +277,7 @@ export default function Settings({
   return (
     <div className="settings-view popup-container">
       <div className="settings-section">
+        <div className="settings-section-title">Workspace</div>
         <div
           className="settings-row"
           style={{ marginBottom: "16px", display: "block" }}
@@ -264,6 +292,7 @@ export default function Settings({
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
               placeholder="yourcompany.keka.com"
+              aria-label="Keka domain"
               style={{
                 flex: 1,
                 padding: "8px",
@@ -292,6 +321,7 @@ export default function Settings({
           </div>
         </div>
 
+        <div className="settings-section-title">Notifications</div>
         <div
           className="settings-row"
           style={{
@@ -310,10 +340,13 @@ export default function Settings({
           <button
             onClick={async () => {
               if (!browser || !browser.notifications) {
-                alert("Notifications API not available");
+                setTestStatus(
+                  "Notifications are not available in this browser.",
+                );
                 return;
               }
               try {
+                setTestStatus("Sending test notification...");
                 let imageUrl: string | null = null;
                 if (memesEnabled) {
                   try {
@@ -348,9 +381,13 @@ export default function Settings({
                 } catch (e) {
                   console.error("Failed to play test notification audio:", e);
                 }
+                setTestStatus("Test notification sent.");
+                setTimeout(() => setTestStatus(""), 2500);
               } catch (error) {
                 console.error("Error showing test notification:", error);
-                alert("Failed to show notification. Check permissions.");
+                setTestStatus(
+                  "Failed to show notification. Check permissions.",
+                );
               }
             }}
             style={{
@@ -367,7 +404,9 @@ export default function Settings({
             Test Now
           </button>
         </div>
+        {testStatus && <div className="settings-status">{testStatus}</div>}
 
+        <div className="settings-section-title">Work Schedule</div>
         <div
           className="settings-row"
           style={{
@@ -423,8 +462,12 @@ export default function Settings({
                 gap: "8px",
               }}
             >
-              <span style={{ fontSize: "12px", color: "#64748b" }}>Full Day</span>
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ fontSize: "12px", color: "#64748b" }}>
+                Full Day
+              </span>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              >
                 <input
                   type="number"
                   min={0}
@@ -473,8 +516,12 @@ export default function Settings({
                 gap: "8px",
               }}
             >
-              <span style={{ fontSize: "12px", color: "#64748b" }}>Half Day</span>
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span style={{ fontSize: "12px", color: "#64748b" }}>
+                Half Day
+              </span>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              >
                 <input
                   type="number"
                   min={0}
@@ -531,7 +578,30 @@ export default function Settings({
                 type="checkbox"
                 className="toggle-switch"
                 checked={showMonthlyAvgTarget}
+                aria-label="Show Monthly Avg Target"
                 onChange={(e) => void setShowMonthlyAvgTarget(e.target.checked)}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="settings-row" style={{ marginBottom: "16px" }}>
+          <div>
+            <div className="settings-label">Do you want to leave now?</div>
+            <div className="settings-description">
+              Have you know what could be the impact? Let's see!
+            </div>
+          </div>
+          <div className="toggle-wrapper">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                className="toggle-switch"
+                checked={showLeaveNowProjection}
+                aria-label="Leave Now Card"
+                onChange={(e) =>
+                  void handleLeaveNowProjectionChange(e.target.checked)
+                }
               />
             </label>
           </div>
@@ -550,6 +620,7 @@ export default function Settings({
                 type="checkbox"
                 className="toggle-switch"
                 checked={notificationsEnabled}
+                aria-label="Enable notifications"
                 onChange={toggleNotifications}
               />
             </label>
@@ -569,6 +640,7 @@ export default function Settings({
                 type="checkbox"
                 className="toggle-switch"
                 checked={memesEnabled}
+                aria-label="Enable memes in notifications"
                 onChange={toggleMemes}
               />
             </label>
@@ -594,60 +666,64 @@ export default function Settings({
               type="checkbox"
               className="toggle-switch"
               checked={isHalfDay}
+              aria-label="Half day"
               onChange={(e) => setIsHalfDay(e.target.checked)}
             />
           </label>
         </div>
       </div>
 
-      <div className="settings-row">
-        <div>
-          <div className="settings-label">Font Preference</div>
-          <div className="settings-description">
-            Choose between Sans-Serif and Monospace
+      <div className="settings-section">
+        <div className="settings-section-title">Display</div>
+        <div className="settings-row">
+          <div>
+            <div className="settings-label">Font Preference</div>
+            <div className="settings-description">
+              Choose between Sans-Serif and Monospace
+            </div>
           </div>
-        </div>
-        <div className="toggle-wrapper" style={{ gap: "8px" }}>
-          <button
-            onClick={() => handleFontChange("sans")}
-            style={{
-              padding: "4px 8px",
-              borderRadius: "4px",
-              border:
-                fontPreference === "sans"
-                  ? "1px solid #3b82f6"
-                  : "1px solid #e5e7eb",
-              backgroundColor:
-                fontPreference === "sans" ? "#eff6ff" : "transparent",
-              color: fontPreference === "sans" ? "#1d4ed8" : "#6b7280",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "var(--font-sans)",
-            }}
-          >
-            Inter
-          </button>
-          <button
-            onClick={() => handleFontChange("mono")}
-            style={{
-              padding: "4px 8px",
-              borderRadius: "4px",
-              border:
-                fontPreference === "mono"
-                  ? "1px solid #3b82f6"
-                  : "1px solid #e5e7eb",
-              backgroundColor:
-                fontPreference === "mono" ? "#eff6ff" : "transparent",
-              color: fontPreference === "mono" ? "#1d4ed8" : "#6b7280",
-              fontSize: "12px",
-              fontWeight: 500,
-              cursor: "pointer",
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            Mono
-          </button>
+          <div className="toggle-wrapper" style={{ gap: "8px" }}>
+            <button
+              onClick={() => handleFontChange("sans")}
+              style={{
+                padding: "4px 8px",
+                borderRadius: "4px",
+                border:
+                  fontPreference === "sans"
+                    ? "1px solid #3b82f6"
+                    : "1px solid #e5e7eb",
+                backgroundColor:
+                  fontPreference === "sans" ? "#eff6ff" : "transparent",
+                color: fontPreference === "sans" ? "#1d4ed8" : "#6b7280",
+                fontSize: "12px",
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "var(--font-sans)",
+              }}
+            >
+              Inter
+            </button>
+            <button
+              onClick={() => handleFontChange("mono")}
+              style={{
+                padding: "4px 8px",
+                borderRadius: "4px",
+                border:
+                  fontPreference === "mono"
+                    ? "1px solid #3b82f6"
+                    : "1px solid #e5e7eb",
+                backgroundColor:
+                  fontPreference === "mono" ? "#eff6ff" : "transparent",
+                color: fontPreference === "mono" ? "#1d4ed8" : "#6b7280",
+                fontSize: "12px",
+                fontWeight: 500,
+                cursor: "pointer",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              Mono
+            </button>
+          </div>
         </div>
       </div>
     </div>

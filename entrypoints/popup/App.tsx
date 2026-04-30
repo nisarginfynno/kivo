@@ -17,6 +17,7 @@ import WeeklyOverview from "./components/WeeklyOverview";
 import { Settings as SettingsIcon, X } from "lucide-react";
 
 const SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY = "show_monthly_avg_target";
+const SHOW_LEAVE_NOW_PROJECTION_STORAGE_KEY = "show_leave_now_projection";
 
 function App() {
   const { accessToken, loading: authLoading, error: authError } = useAuth();
@@ -26,6 +27,7 @@ function App() {
     "main" | "settings" | "setup" | "loading"
   >("loading");
   const [showMonthlyAvgTarget, setShowMonthlyAvgTarget] = useState(false);
+  const [showLeaveNowProjection, setShowLeaveNowProjection] = useState(false);
 
   useEffect(() => {
     const checkSetup = async () => {
@@ -33,11 +35,13 @@ function App() {
         keka_domain,
         keka_font_preference,
         show_monthly_avg_target,
+        show_leave_now_projection,
       } =
         await browser.storage.local.get([
           "keka_domain",
           "keka_font_preference",
           SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY,
+          SHOW_LEAVE_NOW_PROJECTION_STORAGE_KEY,
         ]);
 
       if (keka_font_preference === "mono") {
@@ -47,6 +51,9 @@ function App() {
       }
       if (typeof show_monthly_avg_target === "boolean") {
         setShowMonthlyAvgTarget(show_monthly_avg_target);
+      }
+      if (typeof show_leave_now_projection === "boolean") {
+        setShowLeaveNowProjection(show_leave_now_projection);
       }
 
       if (keka_domain) {
@@ -71,6 +78,16 @@ function App() {
           changes[SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY].newValue as boolean,
         );
       }
+      if (
+        areaName === "local" &&
+        changes[SHOW_LEAVE_NOW_PROJECTION_STORAGE_KEY] &&
+        typeof changes[SHOW_LEAVE_NOW_PROJECTION_STORAGE_KEY].newValue ===
+          "boolean"
+      ) {
+        setShowLeaveNowProjection(
+          changes[SHOW_LEAVE_NOW_PROJECTION_STORAGE_KEY].newValue as boolean,
+        );
+      }
     };
 
     browser.storage.onChanged.addListener(handleStorageChange);
@@ -90,6 +107,24 @@ function App() {
       console.error("Error saving monthly target visibility:", error);
       setShowMonthlyAvgTarget(previousValue);
     }
+  };
+
+  const handleShowLeaveNowProjectionChange = async (value: boolean) => {
+    const previousValue = showLeaveNowProjection;
+    setShowLeaveNowProjection(value);
+    try {
+      await browser.storage.local.set({
+        [SHOW_LEAVE_NOW_PROJECTION_STORAGE_KEY]: value,
+      });
+    } catch (error) {
+      console.error("Error saving leave-now projection visibility:", error);
+      setShowLeaveNowProjection(previousValue);
+    }
+  };
+
+  const returnToToday = () => {
+    setActiveTab("today");
+    setActiveView("main");
   };
 
   const { isHalfDay, setIsHalfDay } = useHalfDay();
@@ -157,9 +192,7 @@ function App() {
             setActiveView(activeView === "main" ? "settings" : "main")
           }
           title={activeView === "settings" ? "Back to Dashboard" : "Settings"}
-          style={{
-            outline: "none",
-          }}
+          aria-label={activeView === "settings" ? "Back to dashboard" : "Open settings"}
         >
           {activeView === "settings" ? <X /> : <SettingsIcon />}
         </button>
@@ -176,32 +209,41 @@ function App() {
               <div className="auth-error-subtext">
                 {authError || "Please log in to Keka in a new tab to continue."}
               </div>
-              <button
-                className="open-keka-button"
-                onClick={async () => {
-                  const { keka_domain } = await browser.storage.local.get(
-                    "keka_domain"
-                  );
-                  const kekaDomain = keka_domain as string;
-                  const url = kekaDomain.startsWith("http")
-                    ? kekaDomain
-                    : `https://${kekaDomain}`;
-                  browser.tabs.create({ url });
-                }}
-              >
-                Open Keka
-              </button>
+              <div className="auth-actions">
+                <button
+                  className="open-keka-button"
+                  onClick={async () => {
+                    const { keka_domain } = await browser.storage.local.get(
+                      "keka_domain"
+                    );
+                    const kekaDomain = keka_domain as string;
+                    const url = kekaDomain.startsWith("http")
+                      ? kekaDomain
+                      : `https://${kekaDomain}`;
+                    browser.tabs.create({ url });
+                  }}
+                >
+                  Open Keka
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => setActiveView("settings")}
+                >
+                  Change Domain
+                </button>
+              </div>
             </div>
           ) : (
             <>
-              <div className="tabs-container">
+              <div className="tabs-container" role="tablist" aria-label="Dashboard views">
                 <button
                   className={`tab-button ${
                     activeTab === "today" ? "active" : ""
                   }`}
-                  onClick={(e) => {
+                  role="tab"
+                  aria-selected={activeTab === "today"}
+                  onClick={() => {
                     setActiveTab("today");
-                    e.currentTarget.blur();
                   }}
                 >
                   Today
@@ -210,9 +252,10 @@ function App() {
                   className={`tab-button ${
                     activeTab === "weekly" ? "active" : ""
                   }`}
-                  onClick={(e) => {
+                  role="tab"
+                  aria-selected={activeTab === "weekly"}
+                  onClick={() => {
                     setActiveTab("weekly");
-                    e.currentTarget.blur();
                   }}
                 >
                   Weekly
@@ -221,9 +264,10 @@ function App() {
                   className={`tab-button ${
                     activeTab === "monthly" ? "active" : ""
                   }`}
-                  onClick={(e) => {
+                  role="tab"
+                  aria-selected={activeTab === "monthly"}
+                  onClick={() => {
                     setActiveTab("monthly");
-                    e.currentTarget.blur();
                   }}
                 >
                   Monthly
@@ -244,6 +288,9 @@ function App() {
                   totalWorkedSeconds={totalWorkedSeconds}
                   weeklyHoursNeededPerDay={weeklyStats.hoursNeededPerDay}
                   monthlyHoursNeededPerDay={monthlyStats.hoursNeededPerDay}
+                  weeklyStats={weeklyStats}
+                  monthlyStats={monthlyStats}
+                  showLeaveNowProjection={showLeaveNowProjection}
                   showMonthlyAvgTarget={showMonthlyAvgTarget}
                   workHoursConfig={workHoursConfig}
                 />
@@ -277,6 +324,9 @@ function App() {
           setIsHalfDay={setIsHalfDay}
           showMonthlyAvgTarget={showMonthlyAvgTarget}
           setShowMonthlyAvgTarget={handleShowMonthlyAvgTargetChange}
+          showLeaveNowProjection={showLeaveNowProjection}
+          setShowLeaveNowProjection={handleShowLeaveNowProjectionChange}
+          onReturnToToday={returnToToday}
         />
       )}
     </div>

@@ -118,8 +118,12 @@ export interface MonthlyStats {
   totalWorkingDaysCount: number;
   currentWorkingDayCount: number;
   remainingWorkingDaysCount: number;
+  futureWorkingDaysCount: number;
   averageHours: number | null;
   hoursNeededPerDay: number | null;
+  monthlyTarget: number;
+  totalWorked: number;
+  remaining: number;
 }
 
 export interface WeeklyStats {
@@ -128,11 +132,31 @@ export interface WeeklyStats {
   totalWorkingDays: number | null;
   currentWorkingDay: number | null;
   remainingWorkingDays: number | null;
+  futureWorkingDays: number | null;
   averageHours: number | null;
   hoursNeededPerDay: number | null;
   weeklyTarget: number;
   totalWorked: number;
   remaining: number;
+}
+
+export type ProjectionStatus = "safe" | "recoverable" | "heavy" | "blocked";
+
+export interface PeriodProjection {
+  averageIfLeaveNow: number | null;
+  remainingHours: number;
+  neededPerFutureDay: number | null;
+  futureWorkingDays: number;
+}
+
+export interface LeaveNowProjection {
+  todayShortfallHours: number;
+  weekly: PeriodProjection | null;
+  monthly: PeriodProjection | null;
+  recommendedTomorrowTarget: number | null;
+  recommendationSource: "weekly" | "monthly" | "daily" | null;
+  status: ProjectionStatus;
+  statusLabel: string;
 }
 
 export interface RangeStatsResponse {

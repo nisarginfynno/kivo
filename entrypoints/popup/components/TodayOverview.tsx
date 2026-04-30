@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   format,
   differenceInSeconds,
@@ -7,19 +7,25 @@ import {
   isSameDay,
 } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { browser } from "wxt/browser";
 import type {
   Metrics,
   LeaveTimeInfo,
   TimePair,
   Break,
   TimeEntry,
+  WeeklyStats,
 } from "../../../utils/types";
 import { useDailyStats } from "../hooks/useDailyStats";
+import LeaveNowProjectionCard from "./LeaveNowProjectionCard";
+import { calculateLeaveNowProjection } from "../../../utils/calculations";
 import {
   formatMinutesAsHoursAndMinutes,
   getDailyTargetMinutes,
   type WorkHoursConfig,
 } from "../../../utils/workHoursConfig";
+
+const TIME_ENTRIES_EXPANDED_STORAGE_KEY = "time_entries_expanded";
 
 interface TodayOverviewProps {
   accessToken: string | null;
@@ -34,6 +40,14 @@ interface TodayOverviewProps {
   totalWorkedSeconds: number;
   weeklyHoursNeededPerDay: number | null;
   monthlyHoursNeededPerDay: number | null;
+  weeklyStats: WeeklyStats | null;
+  monthlyStats: {
+    totalWorkingDays: number | null;
+    futureWorkingDays: number | null;
+    monthlyTarget: number;
+    totalWorked: number;
+  } | null;
+  showLeaveNowProjection: boolean;
   showMonthlyAvgTarget: boolean;
   workHoursConfig: WorkHoursConfig;
 }
@@ -51,10 +65,43 @@ export default function TodayOverview({
   totalWorkedSeconds: liveTotalWorkedSeconds,
   weeklyHoursNeededPerDay,
   monthlyHoursNeededPerDay,
+  weeklyStats,
+  monthlyStats,
+  showLeaveNowProjection,
   showMonthlyAvgTarget,
   workHoursConfig,
 }: TodayOverviewProps) {
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [showTimeEntries, setShowTimeEntries] = useState(false);
+
+  useEffect(() => {
+    const loadTimeEntriesPreference = async () => {
+      const stored = await browser.storage.local.get(
+        TIME_ENTRIES_EXPANDED_STORAGE_KEY,
+      );
+      const storedValue = stored[TIME_ENTRIES_EXPANDED_STORAGE_KEY];
+
+      setShowTimeEntries(
+        typeof storedValue === "boolean" ? storedValue : false,
+      );
+    };
+
+    void loadTimeEntriesPreference();
+  }, []);
+
+  const handleToggleTimeEntries = async () => {
+    const nextValue = !showTimeEntries;
+    setShowTimeEntries(nextValue);
+
+    try {
+      await browser.storage.local.set({
+        [TIME_ENTRIES_EXPANDED_STORAGE_KEY]: nextValue,
+      });
+    } catch (error) {
+      console.error("Error saving time entries visibility:", error);
+      setShowTimeEntries(!nextValue);
+    }
+  };
 
   const isToday = isSameDay(selectedDate, new Date());
 
@@ -137,6 +184,23 @@ export default function TodayOverview({
   const dailyTargetLabel = formatMinutesAsHoursAndMinutes(
     getDailyTargetMinutes(isHalfDay, workHoursConfig),
   );
+  const leaveNowProjection =
+    isToday && metrics
+      ? calculateLeaveNowProjection({
+          totalWorkedSeconds,
+          isHalfDay,
+          weeklyStats,
+          monthlyStats: showMonthlyAvgTarget && monthlyStats
+            ? {
+                monthlyTarget: monthlyStats.monthlyTarget,
+                totalWorked: monthlyStats.totalWorked,
+                totalWorkingDays: monthlyStats.totalWorkingDays,
+                futureWorkingDays: monthlyStats.futureWorkingDays,
+              }
+            : null,
+          workHoursConfig,
+        })
+      : null;
 
   const headerContent = (
     <div className="monthly-header" style={{ marginBottom: "16px" }}>
@@ -155,6 +219,7 @@ export default function TodayOverview({
         <button
           className="icon-button"
           onClick={handlePrevDay}
+          aria-label="Show previous day"
           style={{
             border: "none",
             background: "transparent",
@@ -164,7 +229,6 @@ export default function TodayOverview({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            outline: "none",
           }}
         >
           <ChevronLeft />
@@ -176,6 +240,7 @@ export default function TodayOverview({
           className="icon-button"
           onClick={handleNextDay}
           disabled={isToday}
+          aria-label="Show next day"
           style={{
             border: "none",
             background: "transparent",
@@ -185,7 +250,6 @@ export default function TodayOverview({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            outline: "none",
           }}
         >
           <ChevronRight />
@@ -297,58 +361,74 @@ export default function TodayOverview({
         </div>
       )}
 
+      {isToday && showLeaveNowProjection && leaveNowProjection && (
+        <LeaveNowProjectionCard projection={leaveNowProjection} />
+      )}
+
       {(timePairs.length > 0 || unpairedInEntry) && (
         <div className="attendance-list">
-          <h3 className="list-title">Time Entries</h3>
-          <ul>
-            {timePairs.map((pair, index) => (
-              <Fragment key={`pair-${index}`}>
-                <li className="time-entry">
-                  <span className="time-range">
-                    {format(new Date(pair.startTime), "h:mm a")} -{" "}
-                    {format(new Date(pair.endTime), "h:mm a")}
-                  </span>
-                  <span className="duration">({pair.duration})</span>
-                </li>
-                {breaks[index] && (
-                  <li className="break-entry">
+          <button
+            className="details-toggle"
+            type="button"
+            aria-expanded={showTimeEntries}
+            onClick={() => void handleToggleTimeEntries()}
+          >
+            <span>Time Entries</span>
+            <span className="details-toggle-meta">
+              {showTimeEntries ? "Hide" : `${timePairs.length + (unpairedInEntry ? 1 : 0)} entries`}
+            </span>
+          </button>
+          {showTimeEntries && (
+            <ul>
+              {timePairs.map((pair, index) => (
+                <Fragment key={`pair-${index}`}>
+                  <li className="time-entry">
                     <span className="time-range">
-                      {format(new Date(breaks[index].startTime), "h:mm a")} to{" "}
-                      {format(new Date(breaks[index].endTime), "h:mm a")}
+                      {format(new Date(pair.startTime), "h:mm a")} -{" "}
+                      {format(new Date(pair.endTime), "h:mm a")}
                     </span>
-                    <span className="break-duration">
-                      → {breaks[index].duration}
-                    </span>
+                    <span className="duration">({pair.duration})</span>
                   </li>
-                )}
-              </Fragment>
-            ))}
-            {unpairedInEntry && (
-              <li className="time-entry not-logged-out">
-                <span className="time-range">
-                  {format(new Date(unpairedInEntry.actualTimestamp), "h:mm a")}{" "}
-                  - not logged out
-                </span>
-                {isToday && (
-                  <span className="duration">
-                    (
-                    {(() => {
-                      const startDate = new Date(
-                        unpairedInEntry.actualTimestamp
-                      );
-                      const now = new Date();
-                      const totalSeconds = differenceInSeconds(now, startDate);
-                      const hours = Math.floor(totalSeconds / 3600);
-                      const minutes = Math.floor((totalSeconds % 3600) / 60);
-                      const seconds = totalSeconds % 60;
-                      return `${hours}h ${minutes}m ${seconds}s`;
-                    })()}
-                    )
+                  {breaks[index] && (
+                    <li className="break-entry">
+                      <span className="time-range">
+                        {format(new Date(breaks[index].startTime), "h:mm a")} to{" "}
+                        {format(new Date(breaks[index].endTime), "h:mm a")}
+                      </span>
+                      <span className="break-duration">
+                        → {breaks[index].duration}
+                      </span>
+                    </li>
+                  )}
+                </Fragment>
+              ))}
+              {unpairedInEntry && (
+                <li className="time-entry not-logged-out">
+                  <span className="time-range">
+                    {format(new Date(unpairedInEntry.actualTimestamp), "h:mm a")}{" "}
+                    - not logged out
                   </span>
-                )}
-              </li>
-            )}
-          </ul>
+                  {isToday && (
+                    <span className="duration">
+                      (
+                      {(() => {
+                        const startDate = new Date(
+                          unpairedInEntry.actualTimestamp
+                        );
+                        const now = new Date();
+                        const totalSeconds = differenceInSeconds(now, startDate);
+                        const hours = Math.floor(totalSeconds / 3600);
+                        const minutes = Math.floor((totalSeconds % 3600) / 60);
+                        const seconds = totalSeconds % 60;
+                        return `${hours}h ${minutes}m ${seconds}s`;
+                      })()}
+                      )
+                    </span>
+                  )}
+                </li>
+              )}
+            </ul>
+          )}
         </div>
       )}
     </div>
