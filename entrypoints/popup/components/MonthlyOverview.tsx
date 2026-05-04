@@ -2,6 +2,7 @@ import { useMonthlyStats } from "../hooks/useMonthlyStats";
 import { format, subMonths, startOfMonth } from "date-fns";
 import pluralize from "pluralize";
 import type { WorkHoursConfig } from "../../../utils/workHoursConfig";
+import { MonthlySkeleton } from "./Skeleton";
 
 interface MonthlyOverviewProps {
   accessToken: string | null;
@@ -47,7 +48,7 @@ export default function MonthlyOverview({
             </select>
           </div>
         </div>
-        <p className="loading">Loading monthly data...</p>
+        <MonthlySkeleton />
       </div>
     );
   }

@@ -18,6 +18,7 @@ import type {
 } from "../../../utils/types";
 import { useDailyStats } from "../hooks/useDailyStats";
 import LeaveNowProjectionCard from "./LeaveNowProjectionCard";
+import { TodaySkeleton } from "./Skeleton";
 import { calculateLeaveNowProjection } from "../../../utils/calculations";
 import {
   formatMinutesAsHoursAndMinutes,
@@ -259,12 +260,7 @@ export default function TodayOverview({
   );
 
   if (loading) {
-    return (
-      <div className="monthly-overview">
-        {headerContent}
-        <p className="loading">Loading attendance data...</p>
-      </div>
-    );
+    return <TodaySkeleton />;
   }
 
   if (error) {

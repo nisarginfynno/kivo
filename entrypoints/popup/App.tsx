@@ -15,6 +15,7 @@ import { useWeeklyStats } from "./hooks/useWeeklyStats";
 import { useMonthlyStats } from "./hooks/useMonthlyStats";
 import WeeklyOverview from "./components/WeeklyOverview";
 import { Settings as SettingsIcon, X } from "lucide-react";
+import { AppLoadingSkeleton } from "./components/Skeleton";
 
 const SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY = "show_monthly_avg_target";
 const SHOW_LEAVE_NOW_PROJECTION_STORAGE_KEY = "show_leave_now_projection";
@@ -162,8 +163,13 @@ function App() {
   // If we have an auth error, we shouldn't even try to show metrics error yet
   const appError = activeTab === "today" ? metricsError : null;
 
+
   if (activeView === "loading") {
-    return <div className="loading">Loading configuration...</div>;
+    return (
+      <div className="popup-container">
+        <AppLoadingSkeleton />
+      </div>
+    );
   }
 
   if (activeView === "setup") {

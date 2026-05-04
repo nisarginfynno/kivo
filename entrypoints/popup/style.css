@@ -50,11 +50,6 @@ button {
 button:hover {
   border-color: #646cff;
 }
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;
@@ -93,11 +88,6 @@ button:focus-visible {
 .month-select:hover {
   border-color: #d1d5db;
   background-color: #f9fafb;
-}
-
-.month-select:focus {
-  border-color: #93c5fd;
-  box-shadow: 0 0 0 2px rgba(147, 197, 253, 0.2);
 }
 
 .week-selector-container {

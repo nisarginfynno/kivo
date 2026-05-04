@@ -7,6 +7,7 @@ import {
   normalizeWorkHoursConfig,
   type WorkHoursConfig,
 } from "../../../utils/workHoursConfig";
+import { SettingsSkeleton } from "./Skeleton";
 
 interface SettingsProps {
   isHalfDay: boolean;
@@ -271,7 +272,7 @@ export default function Settings({
   };
 
   if (loading) {
-    return <div className="loading">Loading settings...</div>;
+    return <SettingsSkeleton />;
   }
 
   return (

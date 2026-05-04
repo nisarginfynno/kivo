@@ -11,6 +11,7 @@ import {
 } from "date-fns";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { WorkHoursConfig } from "../../../utils/workHoursConfig";
+import { WeeklySkeleton } from "./Skeleton";
 
 interface WeeklyOverviewProps {
   accessToken: string | null;
@@ -121,7 +122,7 @@ export default function WeeklyOverview({
       </div>
 
       {loading ? (
-        <p className="loading">Loading weekly data...</p>
+        <WeeklySkeleton />
       ) : (
         <div className="monthly-content">
           <div className="monthly-cards-row">
