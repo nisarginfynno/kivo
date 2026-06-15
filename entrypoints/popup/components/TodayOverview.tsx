@@ -25,6 +25,7 @@ import {
   getDailyTargetMinutes,
   type WorkHoursConfig,
 } from "../../../utils/workHoursConfig";
+import { formatDuration } from "../../../utils/calculations";
 
 const TIME_ENTRIES_EXPANDED_STORAGE_KEY = "time_entries_expanded";
 
@@ -166,7 +167,7 @@ export default function TodayOverview({
     isHalfDay,
     selectedDate,
     workHoursConfig,
-    !isToday
+    !isToday,
   );
 
   // Determine which data to use based on the selected date
@@ -191,14 +192,15 @@ export default function TodayOverview({
           totalWorkedSeconds,
           isHalfDay,
           weeklyStats,
-          monthlyStats: showMonthlyAvgTarget && monthlyStats
-            ? {
-                monthlyTarget: monthlyStats.monthlyTarget,
-                totalWorked: monthlyStats.totalWorked,
-                totalWorkingDays: monthlyStats.totalWorkingDays,
-                futureWorkingDays: monthlyStats.futureWorkingDays,
-              }
-            : null,
+          monthlyStats:
+            showMonthlyAvgTarget && monthlyStats
+              ? {
+                  monthlyTarget: monthlyStats.monthlyTarget,
+                  totalWorked: monthlyStats.totalWorked,
+                  totalWorkingDays: monthlyStats.totalWorkingDays,
+                  futureWorkingDays: monthlyStats.futureWorkingDays,
+                }
+              : null,
           workHoursConfig,
         })
       : null;
@@ -260,7 +262,12 @@ export default function TodayOverview({
   );
 
   if (loading) {
-    return <TodaySkeleton />;
+    return (
+      <div className="monthly-overview">
+        {headerContent}
+        <TodaySkeleton />
+      </div>
+    );
   }
 
   if (error) {
@@ -292,9 +299,7 @@ export default function TodayOverview({
           <div className="metric-value">{metrics.totalWorked}</div>
           {metrics.isOvertime && (
             <div className="overtime-indicator">
-              Overtime: {Math.floor(metrics.overtimeSeconds / 3600)}h{" "}
-              {Math.floor((metrics.overtimeSeconds % 3600) / 60)}m{" "}
-              {metrics.overtimeSeconds % 60}s
+              Overtime: {formatDuration(metrics.overtimeSeconds)}
             </div>
           )}
         </div>
@@ -304,8 +309,8 @@ export default function TodayOverview({
               metrics.isCompleted
                 ? "completed"
                 : metrics.isCloseToCompletion
-                ? "warning"
-                : ""
+                  ? "warning"
+                  : ""
             }`}
           >
             <div className="metric-label">Remaining</div>
@@ -318,12 +323,9 @@ export default function TodayOverview({
             {(() => {
               const totalBreakSeconds = breaks.reduce(
                 (acc, b) => acc + (b.durationSeconds || 0),
-                0
+                0,
               );
-              const h = Math.floor(totalBreakSeconds / 3600);
-              const m = Math.floor((totalBreakSeconds % 3600) / 60);
-              const s = totalBreakSeconds % 60;
-              return `${h}h ${m}m ${s}s`;
+              return formatDuration(totalBreakSeconds);
             })()}
           </div>
         </div>
@@ -333,25 +335,21 @@ export default function TodayOverview({
           <div className="leave-cards-row">
             <div className="leave-card normal-leave">
               <div className="leave-label">Normal Leave Time</div>
-              <div className="leave-sub-label">
-                ({dailyTargetLabel})
-              </div>
+              <div className="leave-sub-label">({dailyTargetLabel})</div>
               <div className="leave-time">{leaveTimeInfo.normalLeaveTime}</div>
             </div>
             {weeklyHoursNeededPerDay !== null &&
-              weeklyHoursNeededPerDay > 0 && (
-                renderAverageTargetCard(
-                  "Weekly Avg Target",
-                  weeklyHoursNeededPerDay
-                )
+              weeklyHoursNeededPerDay > 0 &&
+              renderAverageTargetCard(
+                "Weekly Avg Target",
+                weeklyHoursNeededPerDay,
               )}
             {showMonthlyAvgTarget &&
               monthlyHoursNeededPerDay !== null &&
-              monthlyHoursNeededPerDay > 0 && (
-                renderAverageTargetCard(
-                  "Monthly Avg Target",
-                  monthlyHoursNeededPerDay
-                )
+              monthlyHoursNeededPerDay > 0 &&
+              renderAverageTargetCard(
+                "Monthly Avg Target",
+                monthlyHoursNeededPerDay,
               )}
           </div>
         </div>
@@ -371,7 +369,9 @@ export default function TodayOverview({
           >
             <span>Time Entries</span>
             <span className="details-toggle-meta">
-              {showTimeEntries ? "Hide" : `${timePairs.length + (unpairedInEntry ? 1 : 0)} entries`}
+              {showTimeEntries
+                ? "Hide"
+                : `${timePairs.length + (unpairedInEntry ? 1 : 0)} entries`}
             </span>
           </button>
           {showTimeEntries && (
@@ -401,7 +401,10 @@ export default function TodayOverview({
               {unpairedInEntry && (
                 <li className="time-entry not-logged-out">
                   <span className="time-range">
-                    {format(new Date(unpairedInEntry.actualTimestamp), "h:mm a")}{" "}
+                    {format(
+                      new Date(unpairedInEntry.actualTimestamp),
+                      "h:mm a",
+                    )}{" "}
                     - not logged out
                   </span>
                   {isToday && (
@@ -409,14 +412,14 @@ export default function TodayOverview({
                       (
                       {(() => {
                         const startDate = new Date(
-                          unpairedInEntry.actualTimestamp
+                          unpairedInEntry.actualTimestamp,
                         );
                         const now = new Date();
-                        const totalSeconds = differenceInSeconds(now, startDate);
-                        const hours = Math.floor(totalSeconds / 3600);
-                        const minutes = Math.floor((totalSeconds % 3600) / 60);
-                        const seconds = totalSeconds % 60;
-                        return `${hours}h ${minutes}m ${seconds}s`;
+                        const totalSeconds = differenceInSeconds(
+                          now,
+                          startDate,
+                        );
+                        return formatDuration(totalSeconds);
                       })()}
                       )
                     </span>

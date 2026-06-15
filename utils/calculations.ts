@@ -35,6 +35,156 @@ import {
   type WorkHoursConfig,
 } from "./workHoursConfig";
 
+/**
+ * Formats a duration given in total seconds into a human-readable string.
+ * Rules:
+ *   - Hours present  → "Xh Ym"  (seconds are dropped for readability)
+ *   - Minutes only   → "Xm Ys"  (seconds kept so short breaks are precise)
+ *   - Seconds only   → "Xs"
+ */
+export const formatDuration = (totalSeconds: number): string => {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+
+  if (h > 0) {
+    // When hours are shown, always include minutes (even if 0) and drop seconds
+    return `${h}h ${m}m`;
+  }
+  if (m > 0) {
+    return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  }
+  return `${s}s`;
+};
+
+const getKekaDateKey = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+
+  const dateOnlyMatch = value.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (dateOnlyMatch) {
+    return dateOnlyMatch[1] as string;
+  }
+
+  const parsedDate = parseISO(value);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return format(parsedDate, "yyyy-MM-dd");
+};
+
+const parseKekaDateKey = (dateKey: string): Date => parseISO(dateKey);
+
+const normalizeLeaveDuration = (duration: unknown): number => {
+  if (typeof duration !== "number" || !Number.isFinite(duration)) {
+    return 0;
+  }
+
+  return Math.max(0, duration);
+};
+
+const clampLeaveDayFraction = (value: number): number =>
+  Math.min(1, Math.max(0, value));
+
+const getAttendanceShiftHours = (entry: AttendanceData): number =>
+  entry.shiftEffectiveDuration ||
+  entry.shiftDuration ||
+  (entry.halfDayDuration ? entry.halfDayDuration * 2 : 0);
+
+const getWorkedHours = (entry: AttendanceData): number =>
+  entry.totalEffectiveHours ?? 0;
+
+const getLeaveDetailHours = (detail: {
+  startTime?: string;
+  endTime?: string;
+  duration?: { duration?: number };
+}): number => {
+  const explicitDuration = normalizeLeaveDuration(detail.duration?.duration);
+  if (explicitDuration > 0) {
+    return explicitDuration;
+  }
+
+  if (!detail.startTime || !detail.endTime) {
+    return 0;
+  }
+
+  const startTime = parseISO(detail.startTime);
+  const endTime = parseISO(detail.endTime);
+  if (
+    Number.isNaN(startTime.getTime()) ||
+    Number.isNaN(endTime.getTime()) ||
+    endTime <= startTime
+  ) {
+    return 0;
+  }
+
+  return differenceInSeconds(endTime, startTime) / 3600;
+};
+
+const getAttendanceLeaveDuration = (entry: AttendanceData): number => {
+  const explicitLeaveDuration = normalizeLeaveDuration(entry.leaveDayDuration);
+  if (explicitLeaveDuration > 0) {
+    return clampLeaveDayFraction(explicitLeaveDuration);
+  }
+
+  const hasLeaveMarkers =
+    (entry.leaveDayStatuses?.length ?? 0) > 0 ||
+    (entry.leaveDetails?.length ?? 0) > 0;
+  if (!hasLeaveMarkers) {
+    return 0;
+  }
+
+  const shiftHours = getAttendanceShiftHours(entry);
+  const leaveHours = (entry.leaveDetails ?? []).reduce(
+    (total, detail) => total + getLeaveDetailHours(detail),
+    0,
+  );
+
+  if (shiftHours > 0 && leaveHours > 0) {
+    return clampLeaveDayFraction(leaveHours / shiftHours);
+  }
+
+  if (getWorkedHours(entry) === 0) {
+    return 1;
+  }
+
+  if (entry.halfDayDuration && getWorkedHours(entry) <= entry.halfDayDuration) {
+    return 0.5;
+  }
+
+  return 0;
+};
+
+const buildLeaveDurations = (
+  attendanceData: AttendanceData[],
+  _leaveData: LeaveResponse | null,
+  isInPeriod: (date: Date) => boolean,
+): { leaveDurations: Map<string, number>; leaveCount: number } => {
+  const leaveDurations = new Map<string, number>();
+
+  attendanceData.forEach((entry) => {
+    const dateKey = getKekaDateKey(entry.attendanceDate);
+    if (!dateKey) return;
+
+    const leaveDuration = getAttendanceLeaveDuration(entry);
+    if (leaveDuration <= 0 || !isInPeriod(parseKekaDateKey(dateKey))) {
+      return;
+    }
+
+    leaveDurations.set(
+      dateKey,
+      (leaveDurations.get(dateKey) || 0) + leaveDuration,
+    );
+  });
+
+  const leaveCount = Array.from(leaveDurations.values()).reduce(
+    (total, duration) => total + duration,
+    0,
+  );
+
+  return { leaveDurations, leaveCount };
+};
+
 // Helper to calculate total seconds from attendance data
 export const calculateSecondsFromAttendance = (
   attendanceData: AttendanceData[],
@@ -105,10 +255,7 @@ export const calculateTimePairsAndBreaks = (
         const startDate = new Date(currentStart.actualTimestamp);
         const endDate = new Date(entry.actualTimestamp);
         const totalSeconds = differenceInSeconds(endDate, startDate);
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        const duration = `${hours}h ${minutes}m ${seconds}s`;
+        const duration = formatDuration(totalSeconds);
 
         pairs.push({
           startTime: currentStart.actualTimestamp,
@@ -139,19 +286,10 @@ export const calculateTimePairsAndBreaks = (
     const breakSeconds = differenceInSeconds(breakEnd, breakStart);
 
     if (breakSeconds > 0) {
-      const breakHours = Math.floor(breakSeconds / 3600);
-      const breakMins = Math.floor((breakSeconds % 3600) / 60);
-      const breakSecs = breakSeconds % 60;
-
-      let breakDuration = "";
-      if (breakHours > 0) breakDuration += `${breakHours}h `;
-      if (breakMins > 0) breakDuration += `${breakMins}m `;
-      breakDuration += `${breakSecs}s`;
-
       breakList.push({
         startTime: currentPair.endTime,
         endTime: nextPair.startTime,
-        duration: breakDuration.trim(),
+        duration: formatDuration(breakSeconds),
         durationMinutes: Math.floor(breakSeconds / 60),
         durationSeconds: breakSeconds,
       });
@@ -167,19 +305,10 @@ export const calculateTimePairsAndBreaks = (
     const breakSeconds = differenceInSeconds(breakEnd, breakStart);
 
     if (breakSeconds > 0) {
-      const breakHours = Math.floor(breakSeconds / 3600);
-      const breakMins = Math.floor((breakSeconds % 3600) / 60);
-      const breakSecs = breakSeconds % 60;
-
-      let breakDuration = "";
-      if (breakHours > 0) breakDuration += `${breakHours}h `;
-      if (breakMins > 0) breakDuration += `${breakMins}m `;
-      breakDuration += `${breakSecs}s`;
-
       breakList.push({
         startTime: lastPair.endTime,
         endTime: entry.actualTimestamp,
-        duration: breakDuration.trim(),
+        duration: formatDuration(breakSeconds),
         durationMinutes: Math.floor(breakSeconds / 60),
         durationSeconds: breakSeconds,
       });
@@ -224,16 +353,10 @@ export const generateMetricsFromSeconds = (
   }
 
   // Format total worked
-  const totalHours = Math.floor(totalWorkedSeconds / 3600);
-  const totalMins = Math.floor((totalWorkedSeconds % 3600) / 60);
-  const totalSecs = totalWorkedSeconds % 60;
-  const totalWorked = `${totalHours}h ${totalMins}m ${totalSecs}s`;
+  const totalWorked = formatDuration(totalWorkedSeconds);
 
   // Format remaining
-  const remainingHours = Math.floor(remainingSeconds / 3600);
-  const remainingMins = Math.floor((remainingSeconds % 3600) / 60);
-  const remainingSecs = remainingSeconds % 60;
-  const remaining = `${remainingHours}h ${remainingMins}m ${remainingSecs}s`;
+  const remaining = formatDuration(remainingSeconds);
 
   // Calculate estimated completion
   const now = new Date();
@@ -376,32 +499,14 @@ export const processMonthlyStats = (
     });
   }
 
-  // Process Leaves
-  const leaveDurations = new Map<string, number>();
-  let leaveCount = 0;
-  if (
-    leaveData?.data?.leaveHistory &&
-    Array.isArray(leaveData.data.leaveHistory)
-  ) {
-    leaveData.data.leaveHistory.forEach((leaveEntry) => {
-      if (
-        leaveEntry.date &&
-        leaveEntry.change &&
-        leaveEntry.change.duration < 0
-      ) {
-        const leaveDate = parseISO(leaveEntry.date);
-        if (isSameMonth(leaveDate, now)) {
-          const duration = Math.abs(leaveEntry.change.duration);
-          leaveCount += duration;
-          const existing = leaveDurations.get(leaveEntry.date) || 0;
-          leaveDurations.set(leaveEntry.date, existing + duration);
-        }
-      }
-    });
-  }
+  const { leaveDurations, leaveCount } = buildLeaveDurations(
+    attendanceData,
+    leaveData,
+    (date) => isSameMonth(date, now),
+  );
 
   // Calculate Working Days
-  const today = new Date();
+  const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const allDays = eachDayOfInterval({ start: monthStart, end: monthEnd });
 
@@ -547,34 +652,14 @@ export const processWeeklyStats = (
     });
   }
 
-  // Process Leaves
-  const leaveDurations = new Map<string, number>();
-  let leaveCount = 0;
-  if (
-    leaveData &&
-    leaveData.data &&
-    leaveData.data.leaveHistory &&
-    Array.isArray(leaveData.data.leaveHistory)
-  ) {
-    leaveData.data.leaveHistory.forEach((leaveEntry) => {
-      if (
-        leaveEntry.date &&
-        leaveEntry.change &&
-        leaveEntry.change.duration < 0
-      ) {
-        const leaveDate = parseISO(leaveEntry.date);
-        if (isSameWeek(leaveDate, now, { weekStartsOn: 1 })) {
-          const duration = Math.abs(leaveEntry.change.duration);
-          leaveCount += duration;
-          const existing = leaveDurations.get(leaveEntry.date) || 0;
-          leaveDurations.set(leaveEntry.date, existing + duration);
-        }
-      }
-    });
-  }
+  const { leaveDurations, leaveCount } = buildLeaveDurations(
+    attendanceData,
+    leaveData,
+    (date) => isSameWeek(date, now, { weekStartsOn: 1 }),
+  );
 
   // Calculate Working Days & Targets
-  const today = new Date();
+  const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const allDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
   const fullDayHours = minutesToHourDecimal(workHoursConfig.fullDayMinutes);
@@ -633,10 +718,10 @@ export const processWeeklyStats = (
   let totalWorkedHours = 0;
 
   // Find today's entry for real-time calculation
-  const todayEntry = attendanceData.find((entry) => {
-    const entryDate = new Date(entry.attendanceDate);
-    return isSameDay(entryDate, now);
-  });
+  const nowDateKey = format(now, "yyyy-MM-dd");
+  const todayEntry = attendanceData.find(
+    (entry) => getKekaDateKey(entry.attendanceDate) === nowDateKey,
+  );
 
   let todayRealTimeHours = 0;
   if (todayEntry) {
@@ -647,13 +732,14 @@ export const processWeeklyStats = (
   if (attendanceData && attendanceData.length > 0) {
     const weeklyAttendance = attendanceData.filter((entry) => {
       if (!entry.attendanceDate) return false;
-      const entryDate = new Date(entry.attendanceDate);
+      const dateKey = getKekaDateKey(entry.attendanceDate);
+      if (!dateKey) return false;
+      const entryDate = parseKekaDateKey(dateKey);
       return isSameWeek(entryDate, now, { weekStartsOn: 1 });
     });
 
     weeklyAttendance.forEach((entry) => {
-      const entryDate = new Date(entry.attendanceDate);
-      if (isSameDay(entryDate, now)) {
+      if (getKekaDateKey(entry.attendanceDate) === nowDateKey) {
         totalWorkedHours += todayRealTimeHours;
       } else {
         if (entry.totalEffectiveHours) {
@@ -672,7 +758,9 @@ export const processWeeklyStats = (
   if (attendanceData) {
     const pastAttendance = attendanceData.filter((entry) => {
       if (!entry.attendanceDate) return false;
-      const entryDate = new Date(entry.attendanceDate);
+      const dateKey = getKekaDateKey(entry.attendanceDate);
+      if (!dateKey) return false;
+      const entryDate = parseKekaDateKey(dateKey);
       // consistent with currentWorkingDayCount: days < today
       return (
         isSameWeek(entryDate, now, { weekStartsOn: 1 }) && entryDate < today

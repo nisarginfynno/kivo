@@ -5,7 +5,7 @@ export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   manifest: {
     name: "Kivo Time Tracker",
-    version: "1.9.6",
+    version: "1.9.8",
     description:
       "Track daily work hours, manage breaks, and calculate monthly averages with real-time insights for Keka.",
     permissions: [

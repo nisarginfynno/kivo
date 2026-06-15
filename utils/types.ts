@@ -5,6 +5,11 @@ export interface LeaveDetail {
   leaveDayStatus: number;
   startTime?: string;
   endTime?: string;
+  duration?: {
+    unit?: number;
+    duration?: number;
+    durationString?: string;
+  };
 }
 
 export interface TimeEntry {
@@ -15,9 +20,14 @@ export interface TimeEntry {
 
 export interface AttendanceData {
   attendanceDate: string;
+  attendanceDayStatus?: number;
   timeEntries: TimeEntry[];
   leaveDayStatuses: number[];
   leaveDetails: LeaveDetail[];
+  leaveDayDuration?: number;
+  shiftEffectiveDuration?: number;
+  shiftDuration?: number;
+  halfDayDuration?: number;
   totalEffectiveHours?: number;
 }
 

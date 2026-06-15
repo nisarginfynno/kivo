@@ -66,9 +66,7 @@ export function SkeletonDateHeader() {
 // ---------------------------------------------------------------------------
 export function TodaySkeleton() {
   return (
-    <div className="monthly-overview">
-      <SkeletonDateHeader />
-
+    <>
       {/* metrics row — 3 cards */}
       <div className="metrics-row" style={{ marginBottom: 12 }}>
         {[0, 1, 2].map((i) => (
@@ -124,7 +122,7 @@ export function TodaySkeleton() {
           <SkeletonBlock width="50px" height={12} borderRadius={3} />
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -210,13 +208,6 @@ export function WeeklySkeleton() {
 export function MonthlySkeleton() {
   return (
     <div className="monthly-overview">
-      {/* month selector */}
-      <div className="monthly-header" style={{ marginBottom: 12 }}>
-        <div className="month-selector-container">
-          <SkeletonBlock height={34} borderRadius={6} />
-        </div>
-      </div>
-
       <div className="monthly-content">
         {/* row 1 — 3 cards */}
         <div className="monthly-cards-row">
