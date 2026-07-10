@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { browser } from "wxt/browser";
-import type { Metrics, LeaveTimeInfo, TimePair, Break, TimeEntry, AttendanceData } from "../../../utils/types";
-import { generateMetricsFromSeconds, calculateLeaveTimeInfo, calculateTimePairsAndBreaks } from "../../../utils/calculations";
+import { calculateLeaveTimeInfo, calculateTimePairsAndBreaks, generateMetricsFromSeconds } from "../../../utils/calculations";
+import type { AttendanceData, Break, LeaveTimeInfo, Metrics, TimeEntry, TimePair } from "../../../utils/types";
 import type { WorkHoursConfig } from "../../../utils/workHoursConfig";
 
 interface UseCurrentMetricsResult {

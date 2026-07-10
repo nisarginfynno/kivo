@@ -402,7 +402,7 @@ export default function TodayOverview({
                 <li className="time-entry not-logged-out">
                   <span className="time-range">
                     {format(
-                      new Date(unpairedInEntry.actualTimestamp),
+                      new Date(unpairedInEntry.timestamp || unpairedInEntry.actualTimestamp),
                       "h:mm a",
                     )}{" "}
                     - not logged out
@@ -412,7 +412,7 @@ export default function TodayOverview({
                       (
                       {(() => {
                         const startDate = new Date(
-                          unpairedInEntry.actualTimestamp,
+                          unpairedInEntry.timestamp || unpairedInEntry.actualTimestamp,
                         );
                         const now = new Date();
                         const totalSeconds = differenceInSeconds(

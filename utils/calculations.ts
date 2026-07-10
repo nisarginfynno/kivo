@@ -1,29 +1,29 @@
 import {
   differenceInSeconds,
+  eachDayOfInterval,
+  endOfMonth,
+  endOfWeek,
+  format,
+  getDay,
+  isSameDay,
+  isSameMonth,
+  isSameWeek,
   parseISO,
   startOfMonth,
-  endOfMonth,
-  eachDayOfInterval,
-  getDay,
-  isSameMonth,
-  format,
   startOfWeek,
-  endOfWeek,
-  isSameWeek,
-  isSameDay,
 } from "date-fns";
 import type {
   AttendanceData,
-  LeaveTimeInfo,
-  Metrics,
-  TimeEntry,
-  TimePair,
   Break,
   HolidayResponse,
-  LeaveResponse,
   LeaveNowProjection,
+  LeaveResponse,
+  LeaveTimeInfo,
+  Metrics,
   MonthlyStats,
   PeriodProjection,
+  TimeEntry,
+  TimePair,
   WeeklyStats,
 } from "./types";
 import {
@@ -203,7 +203,8 @@ export const calculateSecondsFromAttendance = (
 
   // Add time from unpaired entry
   if (unpairedInEntry) {
-    const startDate = new Date(unpairedInEntry.actualTimestamp);
+    const startVal = unpairedInEntry.timestamp || unpairedInEntry.actualTimestamp;
+    const startDate = new Date(startVal);
     const now = new Date();
     const additionalSeconds = differenceInSeconds(now, startDate);
     calculatedTotalWorkedSeconds += additionalSeconds;
@@ -232,10 +233,15 @@ export const calculateTimePairsAndBreaks = (
   let unpairedInEntry: TimeEntry | null = null;
 
   if (lastEntry.timeEntries && Array.isArray(lastEntry.timeEntries)) {
-    // Sort time entries chronologically to ensure pairs and breaks are calculated in order
-    const sortedEntries = [...lastEntry.timeEntries].sort((a, b) => {
-      if (!a.actualTimestamp || !b.actualTimestamp) return 0;
-      const timeDiff = new Date(a.actualTimestamp).getTime() - new Date(b.actualTimestamp).getTime();
+    // Filter out deleted punches
+    const activeEntries = lastEntry.timeEntries.filter((entry) => !entry.isDeleted);
+
+    // Sort time entries chronologically by effective timestamp to ensure pairs and breaks are calculated in order
+    const sortedEntries = [...activeEntries].sort((a, b) => {
+      const aTime = a.timestamp || a.actualTimestamp;
+      const bTime = b.timestamp || b.actualTimestamp;
+      if (!aTime || !bTime) return 0;
+      const timeDiff = new Date(aTime).getTime() - new Date(bTime).getTime();
       if (timeDiff === 0) {
         // If timestamps are identical, put "In" (0) before "Out" (1)
         return a.punchStatus - b.punchStatus;
@@ -244,7 +250,8 @@ export const calculateTimePairsAndBreaks = (
     });
 
     sortedEntries.forEach((entry: TimeEntry) => {
-      if (!entry.actualTimestamp) return;
+      const entryTime = entry.timestamp || entry.actualTimestamp;
+      if (!entryTime) return;
 
       // punchStatus 0 = In (start), 1 = Out (end)
       if (entry.punchStatus === 0) {
@@ -252,14 +259,15 @@ export const calculateTimePairsAndBreaks = (
         currentStart = entry;
       } else if (entry.punchStatus === 1 && currentStart) {
         // End time - create a pair
-        const startDate = new Date(currentStart.actualTimestamp);
-        const endDate = new Date(entry.actualTimestamp);
+        const startVal = currentStart.timestamp || currentStart.actualTimestamp;
+        const startDate = new Date(startVal);
+        const endDate = new Date(entryTime);
         const totalSeconds = differenceInSeconds(endDate, startDate);
         const duration = formatDuration(totalSeconds);
 
         pairs.push({
-          startTime: currentStart.actualTimestamp,
-          endTime: entry.actualTimestamp,
+          startTime: startVal,
+          endTime: entryTime,
           duration,
           durationMinutes: Math.floor(totalSeconds / 60),
           durationSeconds: totalSeconds,
@@ -299,15 +307,16 @@ export const calculateTimePairsAndBreaks = (
   // Check for break after the last pair if there's an unpaired "In" entry
   if (pairs.length > 0 && unpairedInEntry) {
     const entry = unpairedInEntry as TimeEntry;
+    const entryTime = entry.timestamp || entry.actualTimestamp;
     const lastPair = pairs[pairs.length - 1];
     const breakStart = new Date(lastPair.endTime);
-    const breakEnd = new Date(entry.actualTimestamp);
+    const breakEnd = new Date(entryTime);
     const breakSeconds = differenceInSeconds(breakEnd, breakStart);
 
     if (breakSeconds > 0) {
       breakList.push({
         startTime: lastPair.endTime,
-        endTime: entry.actualTimestamp,
+        endTime: entryTime,
         duration: formatDuration(breakSeconds),
         durationMinutes: Math.floor(breakSeconds / 60),
         durationSeconds: breakSeconds,
@@ -870,20 +879,20 @@ export const calculateLeaveNowProjection = ({
 
   const weekly = weeklyStats
     ? buildPeriodProjection(
-        weeklyStats.weeklyTarget,
-        weeklyStats.totalWorked,
-        weeklyStats.totalWorkingDays,
-        weeklyStats.futureWorkingDays,
-      )
+      weeklyStats.weeklyTarget,
+      weeklyStats.totalWorked,
+      weeklyStats.totalWorkingDays,
+      weeklyStats.futureWorkingDays,
+    )
     : null;
 
   const monthly = monthlyStats
     ? buildPeriodProjection(
-        monthlyStats.monthlyTarget,
-        monthlyStats.totalWorked,
-        monthlyStats.totalWorkingDaysCount ?? monthlyStats.totalWorkingDays,
-        monthlyStats.futureWorkingDaysCount ?? monthlyStats.futureWorkingDays,
-      )
+      monthlyStats.monthlyTarget,
+      monthlyStats.totalWorked,
+      monthlyStats.totalWorkingDaysCount ?? monthlyStats.totalWorkingDays,
+      monthlyStats.futureWorkingDaysCount ?? monthlyStats.futureWorkingDays,
+    )
     : null;
 
   const candidates: Array<{
