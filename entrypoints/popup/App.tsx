@@ -1,21 +1,21 @@
 import { useEffect, useState } from "react";
+import { browser } from "wxt/browser";
 import "./App.css";
-import TodayOverview from "./components/TodayOverview";
 import MonthlyOverview from "./components/MonthlyOverview";
 import Settings from "./components/Settings";
 import Setup from "./components/Setup";
-import { browser } from "wxt/browser";
+import TodayOverview from "./components/TodayOverview";
 
 import { useAuth } from "./hooks/useAuth";
 import { useCurrentMetrics } from "./hooks/useCurrentMetrics";
 import { useHalfDay } from "./hooks/useHalfDay";
 import { useWorkHoursConfig } from "./hooks/useWorkHoursConfig";
 
-import { useWeeklyStats } from "./hooks/useWeeklyStats";
-import { useMonthlyStats } from "./hooks/useMonthlyStats";
-import WeeklyOverview from "./components/WeeklyOverview";
 import { Settings as SettingsIcon, X } from "lucide-react";
 import { AppLoadingSkeleton } from "./components/Skeleton";
+import WeeklyOverview from "./components/WeeklyOverview";
+import { useMonthlyStats } from "./hooks/useMonthlyStats";
+import { useWeeklyStats } from "./hooks/useWeeklyStats";
 
 const SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY = "show_monthly_avg_target";
 const SHOW_LEAVE_NOW_PROJECTION_STORAGE_KEY = "show_leave_now_projection";

@@ -16,6 +16,9 @@ export interface TimeEntry {
   actualTimestamp: string;
   timestamp: string;
   punchStatus: number;
+  isDeleted?: boolean;
+  isAdjusted?: boolean;
+  adjustedTimestamp?: string | null;
 }
 
 export interface AttendanceData {
