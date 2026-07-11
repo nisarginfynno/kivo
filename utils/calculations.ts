@@ -121,7 +121,7 @@ const getLeaveDetailHours = (detail: {
   return differenceInSeconds(endTime, startTime) / 3600;
 };
 
-const getAttendanceLeaveDuration = (entry: AttendanceData): number => {
+export const getAttendanceLeaveDuration = (entry: AttendanceData): number => {
   const explicitLeaveDuration = normalizeLeaveDuration(entry.leaveDayDuration);
   if (explicitLeaveDuration > 0) {
     return clampLeaveDayFraction(explicitLeaveDuration);
@@ -153,6 +153,30 @@ const getAttendanceLeaveDuration = (entry: AttendanceData): number => {
   }
 
   return 0;
+};
+
+export const getTodayLeaveDescription = (
+  entry: AttendanceData | undefined,
+): string | null => {
+  if (!entry) return null;
+
+  const details = entry.leaveDetails || [];
+  if (details.length === 0) {
+    if (entry.leaveDayDuration && entry.leaveDayDuration > 0) {
+      return `Leave (${entry.leaveDayDuration} day)`;
+    }
+    return null;
+  }
+
+  return details
+    .map((detail) => {
+      const type = detail.leaveTypeName || "Leave";
+      const dur = detail.duration?.durationString ||
+                  (detail.duration?.duration ? `${detail.duration.duration} day(s)` : null) ||
+                  (entry.leaveDayDuration ? `${entry.leaveDayDuration} day` : "Partial Day");
+      return `${type} (${dur})`;
+    })
+    .join(", ");
 };
 
 const buildLeaveDurations = (
@@ -328,9 +352,10 @@ export const generateMetricsFromSeconds = (
   isHalfDay: boolean,
   isClockedIn: boolean = false,
   workHoursConfig: WorkHoursConfig = DEFAULT_WORK_HOURS_CONFIG,
+  leaveFraction: number = 0,
 ): Metrics => {
   // Determine target
-  const targetSeconds = getDailyTargetSeconds(isHalfDay, workHoursConfig);
+  const targetSeconds = getDailyTargetSeconds(isHalfDay, workHoursConfig, leaveFraction);
   const remainingSeconds = Math.max(0, targetSeconds - totalWorkedSeconds);
   const isOvertime = totalWorkedSeconds > targetSeconds;
   const overtimeSeconds = isOvertime ? totalWorkedSeconds - targetSeconds : 0;
@@ -392,9 +417,10 @@ export const calculateLeaveTimeInfo = (
   totalWorkedSeconds: number,
   halfDay: boolean,
   workHoursConfig: WorkHoursConfig = DEFAULT_WORK_HOURS_CONFIG,
+  leaveFraction: number = 0,
 ): LeaveTimeInfo => {
   const now = new Date();
-  const normalTargetSeconds = getDailyTargetSeconds(halfDay, workHoursConfig);
+  const normalTargetSeconds = getDailyTargetSeconds(halfDay, workHoursConfig, leaveFraction);
 
   let normalLeaveTimeStr: string;
   if (totalWorkedSeconds >= normalTargetSeconds) {
@@ -413,6 +439,7 @@ export const calculateLeaveTimeInfo = (
   const earlyTargetSeconds = getEarlyLeaveTargetSeconds(
     halfDay,
     workHoursConfig,
+    leaveFraction,
   );
 
   let earlyLeaveTimeStr: string;
@@ -441,6 +468,8 @@ export const calculateMetrics = (
   totalWorkedSeconds: number;
   isClockedIn: boolean;
   leaveTimeInfo: LeaveTimeInfo | null;
+  leaveFraction: number;
+  leaveDescription: string | null;
 } => {
   const { totalWorkedSeconds, isClockedIn } =
     calculateSecondsFromAttendance(attendanceData);
@@ -452,19 +481,31 @@ export const calculateMetrics = (
       totalWorkedSeconds: 0,
       isClockedIn: false,
       leaveTimeInfo: null,
+      leaveFraction: 0,
+      leaveDescription: null,
     };
   }
+
+  // Calculate today's leave fraction and description automatically from attendance data
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const lastEntry = attendanceData[attendanceData.length - 1];
+  const isTodayEntry = lastEntry?.attendanceDate &&
+                       getKekaDateKey(lastEntry.attendanceDate) === todayStr;
+  const leaveFraction = isTodayEntry ? getAttendanceLeaveDuration(lastEntry) : 0;
+  const leaveDescription = isTodayEntry ? getTodayLeaveDescription(lastEntry) : null;
 
   const metrics = generateMetricsFromSeconds(
     totalWorkedSeconds,
     halfDay,
     isClockedIn,
     workHoursConfig,
+    leaveFraction,
   );
   const leaveTimeInfo = calculateLeaveTimeInfo(
     totalWorkedSeconds,
     halfDay,
     workHoursConfig,
+    leaveFraction,
   );
 
   return {
@@ -472,6 +513,8 @@ export const calculateMetrics = (
     totalWorkedSeconds,
     isClockedIn,
     leaveTimeInfo,
+    leaveFraction,
+    leaveDescription,
   };
 };
 
@@ -808,6 +851,7 @@ export const calculateLeaveNowProjection = ({
   weeklyStats,
   monthlyStats,
   workHoursConfig = DEFAULT_WORK_HOURS_CONFIG,
+  leaveFraction = 0,
 }: {
   totalWorkedSeconds: number;
   isHalfDay: boolean;
@@ -821,10 +865,11 @@ export const calculateLeaveNowProjection = ({
     futureWorkingDaysCount?: number | null;
   } | null;
   workHoursConfig?: WorkHoursConfig;
+  leaveFraction?: number;
 }): LeaveNowProjection => {
   const todayWorkedHours = totalWorkedSeconds / 3600;
   const dailyTargetHours =
-    getDailyTargetSeconds(isHalfDay, workHoursConfig) / 3600;
+    getDailyTargetSeconds(isHalfDay, workHoursConfig, leaveFraction) / 3600;
   const todayShortfallHours = Math.max(0, dailyTargetHours - todayWorkedHours);
 
   const buildPeriodProjection = (

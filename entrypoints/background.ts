@@ -350,7 +350,7 @@ async function runNotificationLogic() {
     }
 
     // Calculate current metrics
-    const { metrics, totalWorkedSeconds, isClockedIn, leaveTimeInfo } =
+    const { metrics, totalWorkedSeconds, isClockedIn, leaveTimeInfo, leaveFraction, leaveDescription } =
       calculateMetrics(attendanceData, isHalfDay, workHoursConfig);
     const totalWorkedMinutes = Math.floor(totalWorkedSeconds / 60);
 
@@ -378,7 +378,7 @@ async function runNotificationLogic() {
     // Get notification states
     const notificationStates = await getNotificationStates();
 
-    const targetMinutes = getDailyTargetMinutes(isHalfDay, workHoursConfig);
+    const targetMinutes = getDailyTargetMinutes(isHalfDay, workHoursConfig, leaveFraction);
     const notificationsToShow: Array<{ title: string; message: string; stateKey: keyof NotificationStates; newValue: any; memeType?: MemeNotificationType }> = [];
     const nowLocal = new Date();
     const currentHour = nowLocal.getHours();
@@ -635,6 +635,8 @@ async function runNotificationLogic() {
         current_total_worked_seconds: totalWorkedSeconds,
         current_is_clocked_in: isClockedIn,
         current_leave_time_info: leaveTimeInfo,
+        current_leave_fraction: leaveFraction,
+        current_leave_description: leaveDescription,
         attendance_data: attendanceData,
         last_updated: Date.now()
       });

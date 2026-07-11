@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import "./App.css";
 import TodayOverview from "./components/TodayOverview";
 import MonthlyOverview from "./components/MonthlyOverview";
+import LeavesOverview from "./components/LeavesOverview";
 import Settings from "./components/Settings";
 import Setup from "./components/Setup";
 import { browser } from "wxt/browser";
@@ -19,6 +20,7 @@ import { AppLoadingSkeleton } from "./components/Skeleton";
 
 const SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY = "show_monthly_avg_target";
 const SHOW_LEAVE_NOW_PROJECTION_STORAGE_KEY = "show_leave_now_projection";
+const SHOW_LEAVES_TAB_STORAGE_KEY = "show_leaves_tab";
 
 function App() {
   const { accessToken, loading: authLoading, error: authError } = useAuth();
@@ -29,6 +31,7 @@ function App() {
   >("loading");
   const [showMonthlyAvgTarget, setShowMonthlyAvgTarget] = useState(false);
   const [showLeaveNowProjection, setShowLeaveNowProjection] = useState(false);
+  const [showLeavesTab, setShowLeavesTab] = useState(true);
 
   useEffect(() => {
     const checkSetup = async () => {
@@ -37,12 +40,14 @@ function App() {
         keka_font_preference,
         show_monthly_avg_target,
         show_leave_now_projection,
+        show_leaves_tab,
       } =
         await browser.storage.local.get([
           "keka_domain",
           "keka_font_preference",
           SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY,
           SHOW_LEAVE_NOW_PROJECTION_STORAGE_KEY,
+          SHOW_LEAVES_TAB_STORAGE_KEY,
         ]);
 
       if (keka_font_preference === "mono") {
@@ -55,6 +60,9 @@ function App() {
       }
       if (typeof show_leave_now_projection === "boolean") {
         setShowLeaveNowProjection(show_leave_now_projection);
+      }
+      if (typeof show_leaves_tab === "boolean") {
+        setShowLeavesTab(show_leaves_tab);
       }
 
       if (keka_domain) {
@@ -78,6 +86,15 @@ function App() {
         setShowMonthlyAvgTarget(
           changes[SHOW_MONTHLY_AVG_TARGET_STORAGE_KEY].newValue as boolean,
         );
+      }
+      if (
+        areaName === "local" &&
+        changes[SHOW_LEAVES_TAB_STORAGE_KEY] &&
+        typeof changes[SHOW_LEAVES_TAB_STORAGE_KEY].newValue === "boolean"
+      ) {
+        const visible = changes[SHOW_LEAVES_TAB_STORAGE_KEY].newValue as boolean;
+        setShowLeavesTab(visible);
+        if (!visible) setActiveTab("today");
       }
       if (
         areaName === "local" &&
@@ -123,6 +140,18 @@ function App() {
     }
   };
 
+  const handleShowLeavesTabChange = async (value: boolean) => {
+    const previousValue = showLeavesTab;
+    setShowLeavesTab(value);
+    if (!value && activeTab === "leaves") setActiveTab("today");
+    try {
+      await browser.storage.local.set({ [SHOW_LEAVES_TAB_STORAGE_KEY]: value });
+    } catch (error) {
+      console.error("Error saving Leaves tab visibility:", error);
+      setShowLeavesTab(previousValue);
+    }
+  };
+
   const returnToToday = () => {
     setActiveTab("today");
     setActiveView("main");
@@ -135,6 +164,8 @@ function App() {
     metrics,
     isClockedIn,
     leaveTimeInfo,
+    leaveFraction,
+    leaveDescription,
     timePairs,
     breaks,
     unpairedInEntry,
@@ -143,9 +174,9 @@ function App() {
     totalWorkedSeconds,
   } = useCurrentMetrics(isHalfDay, workHoursConfig);
 
-  const [activeTab, setActiveTab] = useState<"today" | "weekly" | "monthly">(
-    "today"
-  );
+  const [activeTab, setActiveTab] = useState<
+    "today" | "weekly" | "monthly" | "leaves"
+  >("today");
 
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [currentDate] = useState(new Date());
@@ -178,6 +209,7 @@ function App() {
 
   return (
     <div className="popup-container">
+      <div className="popup-shell">
       {/* Header Area */}
       <header className="header">
         <div className="header-title">
@@ -203,6 +235,47 @@ function App() {
           {activeView === "settings" ? <X /> : <SettingsIcon />}
         </button>
       </header>
+
+      {activeView === "main" && accessToken && (
+        <nav className="tabs-container" role="tablist" aria-label="Dashboard views">
+          <button
+            className={`tab-button ${activeTab === "today" ? "active" : ""}`}
+            role="tab"
+            aria-selected={activeTab === "today"}
+            onClick={() => setActiveTab("today")}
+          >
+            Today
+          </button>
+          <button
+            className={`tab-button ${activeTab === "weekly" ? "active" : ""}`}
+            role="tab"
+            aria-selected={activeTab === "weekly"}
+            onClick={() => setActiveTab("weekly")}
+          >
+            Weekly
+          </button>
+          <button
+            className={`tab-button ${activeTab === "monthly" ? "active" : ""}`}
+            role="tab"
+            aria-selected={activeTab === "monthly"}
+            onClick={() => setActiveTab("monthly")}
+          >
+            Monthly
+          </button>
+          {showLeavesTab && (
+            <button
+              className={`tab-button ${activeTab === "leaves" ? "active" : ""}`}
+              role="tab"
+              aria-selected={activeTab === "leaves"}
+              onClick={() => setActiveTab("leaves")}
+            >
+              Leaves
+            </button>
+          )}
+        </nav>
+      )}
+
+      <main className="popup-content">
 
       {/* Main Dashboard View */}
       {activeView === "main" && (
@@ -241,45 +314,6 @@ function App() {
             </div>
           ) : (
             <>
-              <div className="tabs-container" role="tablist" aria-label="Dashboard views">
-                <button
-                  className={`tab-button ${
-                    activeTab === "today" ? "active" : ""
-                  }`}
-                  role="tab"
-                  aria-selected={activeTab === "today"}
-                  onClick={() => {
-                    setActiveTab("today");
-                  }}
-                >
-                  Today
-                </button>
-                <button
-                  className={`tab-button ${
-                    activeTab === "weekly" ? "active" : ""
-                  }`}
-                  role="tab"
-                  aria-selected={activeTab === "weekly"}
-                  onClick={() => {
-                    setActiveTab("weekly");
-                  }}
-                >
-                  Weekly
-                </button>
-                <button
-                  className={`tab-button ${
-                    activeTab === "monthly" ? "active" : ""
-                  }`}
-                  role="tab"
-                  aria-selected={activeTab === "monthly"}
-                  onClick={() => {
-                    setActiveTab("monthly");
-                  }}
-                >
-                  Monthly
-                </button>
-              </div>
-
               {activeTab === "today" && (
                 <TodayOverview
                   accessToken={accessToken}
@@ -288,6 +322,8 @@ function App() {
                   metrics={metrics}
                   isHalfDay={isHalfDay}
                   leaveTimeInfo={leaveTimeInfo}
+                  leaveFraction={leaveFraction}
+                  leaveDescription={leaveDescription}
                   timePairs={timePairs}
                   breaks={breaks}
                   unpairedInEntry={unpairedInEntry}
@@ -318,6 +354,10 @@ function App() {
                   workHoursConfig={workHoursConfig}
                 />
               )}
+
+              {activeTab === "leaves" && (
+                <LeavesOverview accessToken={accessToken} />
+              )}
             </>
           )}
         </>
@@ -332,9 +372,13 @@ function App() {
           setShowMonthlyAvgTarget={handleShowMonthlyAvgTargetChange}
           showLeaveNowProjection={showLeaveNowProjection}
           setShowLeaveNowProjection={handleShowLeaveNowProjectionChange}
+          showLeavesTab={showLeavesTab}
+          setShowLeavesTab={handleShowLeavesTabChange}
           onReturnToToday={returnToToday}
         />
       )}
+      </main>
+      </div>
     </div>
   );
 }

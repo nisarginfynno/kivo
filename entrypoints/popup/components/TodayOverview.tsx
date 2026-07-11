@@ -23,9 +23,11 @@ import { calculateLeaveNowProjection } from "../../../utils/calculations";
 import {
   formatMinutesAsHoursAndMinutes,
   getDailyTargetMinutes,
+  getEarlyLeaveTargetSeconds,
   type WorkHoursConfig,
 } from "../../../utils/workHoursConfig";
 import { formatDuration } from "../../../utils/calculations";
+import { usePartialDayRequest } from "../hooks/usePartialDayRequest";
 
 const TIME_ENTRIES_EXPANDED_STORAGE_KEY = "time_entries_expanded";
 
@@ -52,6 +54,8 @@ interface TodayOverviewProps {
   showLeaveNowProjection: boolean;
   showMonthlyAvgTarget: boolean;
   workHoursConfig: WorkHoursConfig;
+  leaveFraction: number;
+  leaveDescription: string | null;
 }
 
 export default function TodayOverview({
@@ -72,6 +76,8 @@ export default function TodayOverview({
   showLeaveNowProjection,
   showMonthlyAvgTarget,
   workHoursConfig,
+  leaveFraction: liveLeaveFraction,
+  leaveDescription: liveLeaveDescription,
 }: TodayOverviewProps) {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showTimeEntries, setShowTimeEntries] = useState(false);
@@ -106,6 +112,8 @@ export default function TodayOverview({
   };
 
   const isToday = isSameDay(selectedDate, new Date());
+  const isWeekend = workHoursConfig.weekendDays.includes(selectedDate.getDay());
+  const partialDayRequest = usePartialDayRequest(accessToken, selectedDate);
 
   const formatTargetHours = (hoursNeeded: number) => {
     let hours = Math.floor(hoursNeeded);
@@ -175,6 +183,8 @@ export default function TodayOverview({
   const error = isToday ? liveError : pastStats.error;
   const metrics = isToday ? liveMetrics : pastStats.metrics;
   const leaveTimeInfo = isToday ? liveLeaveTimeInfo : pastStats.leaveTimeInfo;
+  const leaveFraction = isToday ? liveLeaveFraction : pastStats.leaveFraction;
+  const leaveDescription = isToday ? liveLeaveDescription : pastStats.leaveDescription;
   const timePairs = isToday ? liveTimePairs : pastStats.timePairs;
   const breaks = isToday ? liveBreaks : pastStats.breaks;
   const unpairedInEntry = isToday
@@ -184,7 +194,7 @@ export default function TodayOverview({
     ? liveTotalWorkedSeconds
     : pastStats.totalWorkedSeconds;
   const dailyTargetLabel = formatMinutesAsHoursAndMinutes(
-    getDailyTargetMinutes(isHalfDay, workHoursConfig),
+    getDailyTargetMinutes(isHalfDay, workHoursConfig, leaveFraction),
   );
   const leaveNowProjection =
     isToday && metrics
@@ -202,6 +212,7 @@ export default function TodayOverview({
                 }
               : null,
           workHoursConfig,
+          leaveFraction,
         })
       : null;
 
@@ -303,7 +314,7 @@ export default function TodayOverview({
             </div>
           )}
         </div>
-        {isToday && (
+        {isToday && !isWeekend && (
           <div
             className={`metric-card ${
               metrics.isCompleted
@@ -330,14 +341,56 @@ export default function TodayOverview({
           </div>
         </div>
       </div>
-      {isToday && leaveTimeInfo && (
+      {partialDayRequest && (
+        <div className="early-leave-request-banner">
+          <span aria-hidden="true">⏱️</span>
+          <div>
+            <strong>Early Leave</strong>
+            <span className="early-leave-request-duration">
+              {formatMinutesAsHoursAndMinutes(partialDayRequest.requestMinutes)}
+            </span>
+            {(partialDayRequest.note || partialDayRequest.reason) && (
+              <span className="early-leave-request-note">
+                — {partialDayRequest.note || partialDayRequest.reason}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+      {isToday && isWeekend && (
+        <div className="weekend-banner">
+          <span aria-hidden="true">☀️</span>
+          <span>Weekend — no work target or leave time today.</span>
+        </div>
+      )}
+      {isToday && !isWeekend && leaveTimeInfo && (
         <div className="leave-info">
+          {leaveFraction > 0 && leaveFraction < 1 && leaveDescription && (
+            <div className="partial-day-leave-banner">
+              <span className="partial-day-leave-icon">📅</span>
+              <div className="partial-day-leave-text">
+                <strong>Partial Day Leave:</strong> {leaveDescription}
+              </div>
+              <div className="partial-day-leave-target">
+                -{formatMinutesAsHoursAndMinutes(Math.round(leaveFraction * workHoursConfig.fullDayMinutes))} Target
+              </div>
+            </div>
+          )}
           <div className="leave-cards-row">
             <div className="leave-card normal-leave">
               <div className="leave-label">Normal Leave Time</div>
               <div className="leave-sub-label">({dailyTargetLabel})</div>
               <div className="leave-time">{leaveTimeInfo.normalLeaveTime}</div>
             </div>
+            {leaveTimeInfo.earlyLeaveTime && leaveTimeInfo.earlyLeaveTime !== "-" && (
+              <div className="leave-card early-leave">
+                <div className="leave-label">Early Leave Time</div>
+                <div className="leave-sub-label">
+                  ({formatMinutesAsHoursAndMinutes(getEarlyLeaveTargetSeconds(isHalfDay, workHoursConfig, leaveFraction) / 60)})
+                </div>
+                <div className="leave-time">{leaveTimeInfo.earlyLeaveTime}</div>
+              </div>
+            )}
             {weeklyHoursNeededPerDay !== null &&
               weeklyHoursNeededPerDay > 0 &&
               renderAverageTargetCard(
@@ -355,7 +408,7 @@ export default function TodayOverview({
         </div>
       )}
 
-      {isToday && showLeaveNowProjection && leaveNowProjection && (
+      {isToday && !isWeekend && showLeaveNowProjection && leaveNowProjection && (
         <LeaveNowProjectionCard projection={leaveNowProjection} />
       )}
 
