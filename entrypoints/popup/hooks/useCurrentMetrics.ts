@@ -9,6 +9,8 @@ interface UseCurrentMetricsResult {
     totalWorkedSeconds: number;
     isClockedIn: boolean;
     leaveTimeInfo: LeaveTimeInfo | null;
+    leaveFraction: number;
+    leaveDescription: string | null;
     timePairs: TimePair[];
     breaks: Break[];
     unpairedInEntry: TimeEntry | null;
@@ -34,6 +36,10 @@ export const useCurrentMetrics = (
     const [liveMetrics, setLiveMetrics] = useState<Metrics | null>(null);
     const [liveTotalSeconds, setLiveTotalSeconds] = useState(0);
     const [liveLeaveTimeInfo, setLiveLeaveTimeInfo] = useState<LeaveTimeInfo | null>(null);
+    const [storedLeaveFraction, setStoredLeaveFraction] = useState(0);
+    const [storedLeaveDescription, setStoredLeaveDescription] = useState<string | null>(null);
+    const [liveLeaveFraction, setLiveLeaveFraction] = useState(0);
+    const [liveLeaveDescription, setLiveLeaveDescription] = useState<string | null>(null);
 
     // Timer ref
     const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -45,6 +51,8 @@ export const useCurrentMetrics = (
                 'current_total_worked_seconds',
                 'current_is_clocked_in',
                 'current_leave_time_info',
+                'current_leave_fraction',
+                'current_leave_description',
                 'attendance_data',
                 'last_updated'
             ]);
@@ -55,6 +63,8 @@ export const useCurrentMetrics = (
                 setStoredTotalSeconds((storedData.current_total_worked_seconds as number) || 0);
                 setIsClockedIn(!!(storedData.current_is_clocked_in as boolean));
                 setLastUpdated((storedData.last_updated as number) || Date.now());
+                setStoredLeaveFraction((storedData.current_leave_fraction as number) || 0);
+                setStoredLeaveDescription((storedData.current_leave_description as string) || null);
 
                 // Check if data is quite old (stale)
                 const lastUpdatedTime = storedData.last_updated as number;
@@ -108,16 +118,20 @@ export const useCurrentMetrics = (
                 isHalfDay,
                 isClockedIn,
                 workHoursConfig,
+                storedLeaveFraction,
             );
             const newLeaveInfo = calculateLeaveTimeInfo(
                 currentSeconds,
                 isHalfDay,
                 workHoursConfig,
+                storedLeaveFraction,
             );
 
             setLiveMetrics(newMetrics);
             setLiveTotalSeconds(currentSeconds);
             setLiveLeaveTimeInfo(newLeaveInfo);
+            setLiveLeaveFraction(storedLeaveFraction);
+            setLiveLeaveDescription(storedLeaveDescription);
         };
 
         // Run immediately
@@ -132,7 +146,7 @@ export const useCurrentMetrics = (
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
         };
-    }, [storedMetrics, storedTotalSeconds, isClockedIn, lastUpdated, isHalfDay, workHoursConfig]);
+    }, [storedMetrics, storedTotalSeconds, isClockedIn, lastUpdated, isHalfDay, workHoursConfig, storedLeaveFraction, storedLeaveDescription]);
 
     // Calculate pairs and breaks from stored attendance data
     const { timePairs, breaks, unpairedInEntry } = calculateTimePairsAndBreaks(storedAttendanceData);
@@ -142,6 +156,8 @@ export const useCurrentMetrics = (
         totalWorkedSeconds: liveTotalSeconds,
         isClockedIn,
         leaveTimeInfo: liveLeaveTimeInfo,
+        leaveFraction: liveLeaveFraction,
+        leaveDescription: liveLeaveDescription,
         timePairs,
         breaks,
         unpairedInEntry,

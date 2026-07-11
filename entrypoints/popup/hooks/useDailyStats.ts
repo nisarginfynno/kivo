@@ -5,6 +5,8 @@ import {
   calculateLeaveTimeInfo,
   calculateTimePairsAndBreaks,
   generateMetricsFromSeconds,
+  getAttendanceLeaveDuration,
+  getTodayLeaveDescription,
 } from "../../../utils/calculations";
 import type { Metrics, LeaveTimeInfo, TimePair, Break, TimeEntry } from "../../../utils/types";
 import type { WorkHoursConfig } from "../../../utils/workHoursConfig";
@@ -14,6 +16,8 @@ interface UseDailyStatsResult {
   totalWorkedSeconds: number;
   isClockedIn: boolean;
   leaveTimeInfo: LeaveTimeInfo | null;
+  leaveFraction: number;
+  leaveDescription: string | null;
   timePairs: TimePair[];
   breaks: Break[];
   unpairedInEntry: TimeEntry | null;
@@ -35,6 +39,8 @@ export const useDailyStats = (
   const [timePairs, setTimePairs] = useState<TimePair[]>([]);
   const [breaks, setBreaks] = useState<Break[]>([]);
   const [unpairedInEntry, setUnpairedInEntry] = useState<TimeEntry | null>(null);
+  const [leaveFraction, setLeaveFraction] = useState(0);
+  const [leaveDescription, setLeaveDescription] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -55,15 +61,17 @@ export const useDailyStats = (
         );
 
         if (!exactDayData || exactDayData.length === 0) {
-           setMetrics(null);
-           setTotalWorkedSeconds(0);
-           setIsClockedIn(false);
-           setLeaveTimeInfo(null);
-           setTimePairs([]);
-           setBreaks([]);
-           setUnpairedInEntry(null);
-           setLoading(false);
-           return;
+            setMetrics(null);
+            setTotalWorkedSeconds(0);
+            setIsClockedIn(false);
+            setLeaveTimeInfo(null);
+            setLeaveFraction(0);
+            setLeaveDescription(null);
+            setTimePairs([]);
+            setBreaks([]);
+            setUnpairedInEntry(null);
+            setLoading(false);
+            return;
         }
 
         // Calculate pairs and breaks directly from the data
@@ -89,22 +97,29 @@ export const useDailyStats = (
           totalWorkedSecs = Math.floor(attendanceEntry.totalEffectiveHours * 3600);
         }
 
+        const computedLeaveFraction = getAttendanceLeaveDuration(attendanceEntry);
+        const computedLeaveDescription = getTodayLeaveDescription(attendanceEntry);
+
         const finalMetrics = generateMetricsFromSeconds(
           totalWorkedSecs,
           isHalfDay,
           false,
           workHoursConfig,
+          computedLeaveFraction,
         );
         const finalLeaveInfo = calculateLeaveTimeInfo(
           totalWorkedSecs,
           isHalfDay,
           workHoursConfig,
+          computedLeaveFraction,
         );
 
         setMetrics(finalMetrics);
         setTotalWorkedSeconds(totalWorkedSecs);
         setIsClockedIn(!!calculatedPairs.unpairedInEntry);
         setLeaveTimeInfo(finalLeaveInfo);
+        setLeaveFraction(computedLeaveFraction);
+        setLeaveDescription(computedLeaveDescription);
 
       } catch (err) {
         if (err instanceof Error) {
@@ -125,6 +140,8 @@ export const useDailyStats = (
     totalWorkedSeconds,
     isClockedIn,
     leaveTimeInfo,
+    leaveFraction,
+    leaveDescription,
     timePairs,
     breaks,
     unpairedInEntry,

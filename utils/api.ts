@@ -1,5 +1,9 @@
 import { browser } from 'wxt/browser';
-import type { AttendanceData } from './types';
+import type {
+    AttendanceData,
+    AttendanceRequestsResponse,
+    PartialDayRequest,
+} from './types';
 
 const DEFAULT_DOMAIN = 'infynno.keka.com';
 
@@ -41,7 +45,9 @@ const apiRequest = async (endpoint: string, token: string, options: RequestOptio
         throw new Error(`API request failed: ${response.status} ${response.statusText}`);
     }
 
-    return response.json();
+    const resData = await response.json();
+    console.log(`[API Response] ${options.method || 'GET'} ${endpoint}:`, resData);
+    return resData;
 };
 
 export const fetchAttendanceSummary = async (token: string, date?: string): Promise<AttendanceData[] | null> => {
@@ -88,4 +94,25 @@ export const fetchRangeStats = async (token: string, fromDate: string, toDate: s
     } catch (error) {
         throw error;
     }
+}
+
+export const fetchAttendanceCaptureScheme = async (token: string) => {
+    try {
+        return await apiRequest('/k/attendance/api/mytime/attendance/attendancecapturescheme', token);
+    } catch (error) {
+        throw error;
+    }
+}
+
+export const fetchPartialDayRequests = async (
+    token: string,
+    fromDate: string,
+    toDate: string,
+): Promise<PartialDayRequest[]> => {
+    const response = await apiRequest(
+        `/k/attendance/api/mytime/attendance/attendancerequests?fromDate=${fromDate}&toDate=${toDate}`,
+        token,
+    ) as AttendanceRequestsResponse;
+
+    return response?.data?.partialDayRequests ?? [];
 }

@@ -122,6 +122,21 @@ export interface LeaveResponse {
   };
 }
 
+export interface PartialDayRequest {
+  id: number;
+  requestDate: string;
+  requestStatus: number;
+  requestMinutes: number;
+  note?: string | null;
+  reason?: string | null;
+}
+
+export interface AttendanceRequestsResponse {
+  data?: {
+    partialDayRequests?: PartialDayRequest[];
+  };
+}
+
 export interface MonthlyStats {
   holidayDates: string[];
   leaveCount: number;
@@ -181,4 +196,34 @@ export interface RangeStatsResponse {
       totalEffectiveHoursInHHMM: string;
     };
   };
+}
+
+export interface LeaveSummaryDuration {
+  unit?: number;
+  duration?: number;
+  durationString?: string;
+}
+
+export interface LeaveType {
+  id: number;
+  name: string;
+  code: string;
+  description: string;
+  isPaid: boolean;
+  isSick: boolean;
+}
+
+export interface LeaveTypeConfig {
+  leaveType: LeaveType;
+}
+
+export interface LeaveSummary {
+  id: number;
+  employeeId: number;
+  typeId: number;
+  planId: number;
+  annualQuota: LeaveSummaryDuration;
+  availableBalance: LeaveSummaryDuration;
+  consumedBalance: LeaveSummaryDuration;
+  leaveTypeConfig: LeaveTypeConfig;
 }

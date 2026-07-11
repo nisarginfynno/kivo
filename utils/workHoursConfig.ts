@@ -1,6 +1,8 @@
 export interface WorkHoursConfig {
   fullDayMinutes: number;
   halfDayMinutes: number;
+  /** JavaScript day indexes that are non-working days (0 = Sun, 6 = Sat). */
+  weekendDays: number[];
 }
 
 export const WORK_HOURS_CONFIG_STORAGE_KEY = "work_hours_config_v1";
@@ -8,6 +10,7 @@ export const WORK_HOURS_CONFIG_STORAGE_KEY = "work_hours_config_v1";
 export const DEFAULT_WORK_HOURS_CONFIG: WorkHoursConfig = {
   fullDayMinutes: 8 * 60 + 15,
   halfDayMinutes: 4 * 60 + 30,
+  weekendDays: [0, 6],
 };
 
 const MIN_TARGET_MINUTES = 30;
@@ -33,6 +36,11 @@ export const normalizeWorkHoursConfig = (
 ): WorkHoursConfig => {
   const parsedFullDay = parseNumericMinutes(rawConfig?.fullDayMinutes);
   const parsedHalfDay = parseNumericMinutes(rawConfig?.halfDayMinutes);
+  const weekendDays = Array.isArray(rawConfig?.weekendDays)
+    ? [...new Set(rawConfig.weekendDays.filter(
+        (day): day is number => Number.isInteger(day) && day >= 0 && day <= 6,
+      ))].sort((a, b) => a - b)
+    : DEFAULT_WORK_HOURS_CONFIG.weekendDays;
 
   const fullDayMinutes = clampMinutes(
     parsedFullDay ?? DEFAULT_WORK_HOURS_CONFIG.fullDayMinutes,
@@ -45,6 +53,7 @@ export const normalizeWorkHoursConfig = (
   return {
     fullDayMinutes,
     halfDayMinutes: Math.min(halfDayMinutes, fullDayMinutes),
+    weekendDays,
   };
 };
 
@@ -86,20 +95,33 @@ export const minutesToHourDecimal = (minutes: number): number => {
 export const getDailyTargetMinutes = (
   isHalfDay: boolean,
   workHoursConfig: WorkHoursConfig,
-): number =>
-  isHalfDay ? workHoursConfig.halfDayMinutes : workHoursConfig.fullDayMinutes;
+  leaveFraction: number = 0,
+): number => {
+  if (isHalfDay || leaveFraction === 0.5) {
+    return workHoursConfig.halfDayMinutes;
+  }
+  if (leaveFraction >= 1.0) {
+    return 0;
+  }
+  if (leaveFraction > 0) {
+    return Math.round(workHoursConfig.fullDayMinutes * (1 - leaveFraction));
+  }
+  return workHoursConfig.fullDayMinutes;
+};
 
 export const getDailyTargetSeconds = (
   isHalfDay: boolean,
   workHoursConfig: WorkHoursConfig,
-): number => getDailyTargetMinutes(isHalfDay, workHoursConfig) * 60;
+  leaveFraction: number = 0,
+): number => getDailyTargetMinutes(isHalfDay, workHoursConfig, leaveFraction) * 60;
 
 export const getEarlyLeaveTargetSeconds = (
   isHalfDay: boolean,
   workHoursConfig: WorkHoursConfig,
+  leaveFraction: number = 0,
 ): number => {
-  const targetMinutes = getDailyTargetMinutes(isHalfDay, workHoursConfig);
-  const offset = isHalfDay
+  const targetMinutes = getDailyTargetMinutes(isHalfDay, workHoursConfig, leaveFraction);
+  const offset = (isHalfDay || leaveFraction === 0.5)
     ? HALF_DAY_EARLY_LEAVE_OFFSET_MINUTES
     : FULL_DAY_EARLY_LEAVE_OFFSET_MINUTES;
   return Math.max(0, targetMinutes - offset) * 60;

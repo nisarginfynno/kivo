@@ -16,6 +16,8 @@ interface SettingsProps {
   setShowMonthlyAvgTarget: (value: boolean) => void | Promise<void>;
   showLeaveNowProjection: boolean;
   setShowLeaveNowProjection: (value: boolean) => void | Promise<void>;
+  showLeavesTab: boolean;
+  setShowLeavesTab: (value: boolean) => void | Promise<void>;
   onReturnToToday: () => void;
 }
 
@@ -26,6 +28,8 @@ export default function Settings({
   setShowMonthlyAvgTarget,
   showLeaveNowProjection,
   setShowLeaveNowProjection,
+  showLeavesTab,
+  setShowLeavesTab,
   onReturnToToday,
 }: SettingsProps) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
@@ -41,6 +45,9 @@ export default function Settings({
   );
   const [halfDayTargetMinutes, setHalfDayTargetMinutes] = useState(
     DEFAULT_WORK_HOURS_CONFIG.halfDayMinutes,
+  );
+  const [weekendDays, setWeekendDays] = useState<number[]>(
+    DEFAULT_WORK_HOURS_CONFIG.weekendDays,
   );
   const saveWorkHoursTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -85,6 +92,7 @@ export default function Settings({
         );
         setFullDayTargetMinutes(normalizedWorkHours.fullDayMinutes);
         setHalfDayTargetMinutes(normalizedWorkHours.halfDayMinutes);
+        setWeekendDays(normalizedWorkHours.weekendDays);
       } catch (error) {
         console.error("Error loading settings:", error);
       } finally {
@@ -114,11 +122,13 @@ export default function Settings({
   const persistWorkHours = async (
     fullDayMinutes: number,
     halfDayMinutes: number,
+    nextWeekendDays: number[] = weekendDays,
   ) => {
     try {
       const normalized = normalizeWorkHoursConfig({
         fullDayMinutes,
         halfDayMinutes: Math.min(halfDayMinutes, fullDayMinutes),
+        weekendDays: nextWeekendDays,
       });
 
       await browser.storage.local.set({
@@ -127,6 +137,7 @@ export default function Settings({
 
       setFullDayTargetMinutes(normalized.fullDayMinutes);
       setHalfDayTargetMinutes(normalized.halfDayMinutes);
+      setWeekendDays(normalized.weekendDays);
 
       // Refresh background calculations immediately.
       browser.runtime.sendMessage({ type: "FORCE_CHECK" }).catch(() => {});
@@ -146,6 +157,18 @@ export default function Settings({
     saveWorkHoursTimeoutRef.current = setTimeout(() => {
       void persistWorkHours(nextFullDayMinutes, nextHalfDayMinutes);
     }, 250);
+  };
+
+  const toggleWeekendDay = (day: number) => {
+    const nextWeekendDays = weekendDays.includes(day)
+      ? weekendDays.filter((item) => item !== day)
+      : [...weekendDays, day].sort((a, b) => a - b);
+    setWeekendDays(nextWeekendDays);
+    void persistWorkHours(
+      fullDayTargetMinutes,
+      halfDayTargetMinutes,
+      nextWeekendDays,
+    );
   };
 
   const parseNumberInput = (value: string, fallback: number): number => {
@@ -276,7 +299,7 @@ export default function Settings({
   }
 
   return (
-    <div className="settings-view popup-container">
+    <div className="settings-view">
       <div className="settings-section">
         <div className="settings-section-title">Workspace</div>
         <div
@@ -562,6 +585,52 @@ export default function Settings({
                 />
                 <span style={{ fontSize: "12px", color: "#64748b" }}>mins</span>
               </div>
+            </label>
+          </div>
+        </div>
+
+        <div
+          className="settings-row weekend-days-setting"
+          style={{ marginBottom: "16px", display: "block" }}
+        >
+          <div className="settings-label">Weekend days</div>
+          <div className="settings-description" style={{ marginBottom: "8px" }}>
+            Leave times and daily targets are hidden on these days.
+          </div>
+          <div className="weekend-day-picker" aria-label="Weekend days">
+            {[
+              [0, "Sun"], [1, "Mon"], [2, "Tue"], [3, "Wed"],
+              [4, "Thu"], [5, "Fri"], [6, "Sat"],
+            ].map(([day, label]) => (
+              <button
+                key={day}
+                type="button"
+                className={`weekend-day ${weekendDays.includes(day as number) ? "selected" : ""}`}
+                aria-pressed={weekendDays.includes(day as number)}
+                onClick={() => toggleWeekendDay(day as number)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="settings-row" style={{ marginBottom: "16px" }}>
+          <div>
+            <div className="settings-label">Show Leaves Tab</div>
+            <div className="settings-description">
+              Show or hide Leave Balances and Limits in the dashboard
+            </div>
+          </div>
+          <div className="toggle-wrapper">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                className="toggle-switch"
+                checked={showLeavesTab}
+                aria-label="Show Leaves Tab"
+                onChange={(e) => void setShowLeavesTab(e.target.checked)}
+              />
             </label>
           </div>
         </div>
